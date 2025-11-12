@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use hokulea_proof::hint::ExtendedHintType;
 use kona_cli::cli_styles;
-use kona_client::fpvm_evm::FpvmOpEvmFactory;
+use kona_client::fpvm_evm::FpvmMegaEvmFactory;
 use kona_host::single::SingleChainHostError;
 use kona_host::single::SingleChainProviders;
 use kona_host::PreimageServer;
@@ -137,10 +137,10 @@ impl SingleChainHostWithEigenDA {
         let client_task = task::spawn(hokulea_client_bin::client::run_direct_client(
             OracleReader::new(preimage.client.clone()),
             HintWriter::new(hint.client.clone()),
-            FpvmOpEvmFactory::new(
-                HintWriter::new(hint.client),
-                OracleReader::new(preimage.client),
-            ),
+            FpvmMegaEvmFactory::new(
+                HintWriter::new(hint.client.clone()),
+                OracleReader::new(preimage.client.clone()),
+            ).build_factory(),
         ));
 
         let (_, client_result) = tokio::try_join!(server_task, client_task)?;
