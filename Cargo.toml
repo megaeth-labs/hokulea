@@ -37,6 +37,9 @@ kona-registry = { version = "0.3.0", git = "https://github.com/op-rs/kona", tag 
 kona-rpc = { version = "0.2.0", git = "https://github.com/op-rs/kona", tag = "kona-client/v1.0.2", default-features = false }
 kona-cli = { version = "0.2.0", git = "https://github.com/op-rs/kona", tag = "kona-client/v1.0.2", default-features = false }
 
+# MegaEth
+kona-megaevm = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-megaevm" }
+
 # Workspace
 hokulea-host-bin = { path = "bin/host", version = "0.1.0", default-features = false }
 hokulea-client-bin = { path = "bin/client", version = "0.1.0", default-features = false }

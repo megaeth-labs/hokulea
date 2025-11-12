@@ -18,6 +18,7 @@ use kona_proof::{
 };
 
 use kona_derive::sources::EthereumDataSource;
+use kona_megaevm::LazyMegaEvmFactory;
 
 use alloy_evm::{EvmFactory, FromRecoveredTx, FromTxWithEncoded};
 use op_alloy_consensus::OpTxEnvelope;
@@ -28,17 +29,15 @@ pub async fn run_fp_client<
     O: CommsClient + FlushableCache + Send + Sync + Debug,
     B: BlobProvider + Send + Sync + Debug + Clone,
     E: EigenDABlobProvider + Send + Sync + Debug + Clone,
-    Evm: EvmFactory<Spec = OpSpecId> + Send + Sync + Debug + Clone + 'static,
 >(
     oracle: Arc<O>,
     beacon: B,
     eigenda: E,
-    evm_factory: Evm,
+    evm_factory: LazyMegaEvmFactory,
 ) -> Result<(), FaultProofProgramError>
 where
     <B as BlobProvider>::Error: Debug,
     <E as EigenDABlobProvider>::Error: Debug,
-    <Evm as EvmFactory>::Tx: FromTxWithEncoded<OpTxEnvelope> + FromRecoveredTx<OpTxEnvelope>,
 {
     ////////////////////////////////////////////////////////////////
     //                          PROLOGUE                          //

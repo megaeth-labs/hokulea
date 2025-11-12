@@ -21,3 +21,6 @@ kona-derive.workspace = true
 hokulea-eigenda.workspace = true
 
 tracing.workspace = true
+
+# MegaEth
+kona-megaevm.workspace = true
