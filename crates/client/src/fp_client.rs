@@ -20,9 +20,6 @@ use kona_proof::{
 use kona_derive::sources::EthereumDataSource;
 use kona_megaevm::LazyMegaEvmFactory;
 
-use alloy_evm::{EvmFactory, FromRecoveredTx, FromTxWithEncoded};
-use op_alloy_consensus::OpTxEnvelope;
-use op_revm::OpSpecId;
 
 // The core client takes both beacon and eigenda struct, this is
 pub async fn run_fp_client<

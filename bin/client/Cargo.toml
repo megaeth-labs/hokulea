@@ -20,6 +20,9 @@ op-alloy-consensus.workspace = true
 op-revm.workspace = true
 alloy-evm.workspace = true
 
+# MegaEth
+kona-megaevm.workspace = true
+
 [package.metadata.cargo-machete]
 # cfg-if is used by the `client_entry` macro in kona-client
 # but somehow machete doesn't see it as a dependency

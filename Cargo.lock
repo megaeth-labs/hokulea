@@ -4366,6 +4366,7 @@ dependencies = [
  "hokulea-client",
  "hokulea-proof",
  "kona-client",
+ "kona-megaevm",
  "kona-preimage",
  "kona-proof",
  "kona-std-fpvm",
