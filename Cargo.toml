@@ -168,3 +168,20 @@ sp1-prover = "4.2.0"
 log = { version = "0.4" }
 hex = "0.4"
 url = { version = "2.5.4" }
+
+[patch."https://github.com/op-rs/kona"]
+kona-cli = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-cli" }
+kona-client = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-client" }
+kona-derive = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-derive" }
+kona-driver = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-driver" }
+kona-executor = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-executor" }
+kona-genesis = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-genesis" }
+kona-host = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-host" }
+kona-mpt = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-mpt" }
+kona-preimage = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-preimage" }
+kona-proof = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-proof" }
+kona-protocol = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-protocol" }
+kona-registry = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-registry" }
+kona-std-fpvm = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-std-fpvm" }
+kona-providers-alloy = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-providers-alloy" }
+kona-std-fpvm-proc = { git = "https://github.com/megaeth-labs/mega-kona.git", rev = "3e87d9524a74b8c64927d0eef9ecb5c5b91f45ce", package = "kona-std-fpvm-proc" }
