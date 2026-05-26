@@ -9,7 +9,7 @@ use kona_preimage::{HintWriter, OracleReader};
 use kona_std_fpvm::{FileChannel, FileDescriptor};
 use kona_std_fpvm_proc::client_entry;
 
-use kona_client::fpvm_evm::FpvmOpEvmFactory;
+use kona_client::fpvm_evm::FpvmMegaEvmFactory;
 
 /// The global preimage oracle reader pipe.
 static ORACLE_READER_PIPE: FileChannel =
@@ -30,6 +30,6 @@ fn main() -> Result<(), String> {
     kona_proof::block_on(run_direct_client(
         ORACLE_READER,
         HINT_WRITER,
-        FpvmOpEvmFactory::new(HINT_WRITER, ORACLE_READER),
+        FpvmMegaEvmFactory::new(HINT_WRITER, ORACLE_READER).build_factory(),
     ))
 }

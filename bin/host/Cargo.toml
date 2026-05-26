@@ -3,6 +3,10 @@ name = "hokulea-host-bin"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["mega-evm"]
+mega-evm = ["hokulea-client-bin/mega-evm"]
+
 [dependencies]
 # Hokulea and EigenDA
 hokulea-proof.workspace = true
