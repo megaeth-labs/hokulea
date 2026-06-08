@@ -23,14 +23,9 @@ tracing.workspace = true
 kona-client.workspace = true
 kona-preimage.workspace = true
 kona-proof.workspace = true
+kona-megaevm.workspace = true
 
-# Execution
-alloy-evm.workspace = true
-alloy-op-evm.workspace = true
 alloy-rpc-client.workspace = true
-op-alloy-consensus.workspace = true
-op-revm.workspace = true
-revm.workspace = true
 
 canoe-provider.workspace = true
 canoe-sp1-cc-host = { workspace = true, optional = true }

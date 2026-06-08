@@ -3,8 +3,9 @@
 use clap::Parser;
 use hokulea_host_bin::{cfg::SingleChainHostWithEigenDA, init_tracing_subscriber};
 use hokulea_zkvm_verification::eigenda_witness_to_preloaded_provider;
-use kona_client::fpvm_evm::FpvmOpEvmFactory;
+use kona_client::fpvm_evm::FpvmMegaEvmFactory;
 use kona_client::single::FaultProofProgramError;
+use kona_megaevm::LazyMegaEvmFactory;
 use kona_preimage::{
     BidirectionalChannel, CommsClient, HintWriter, HintWriterClient, OracleReader,
     PreimageOracleClient,
@@ -13,12 +14,6 @@ use kona_proof::CachingOracle;
 use tokio::task;
 
 use core::fmt::Debug;
-
-use alloy_evm::{EvmFactory, FromRecoveredTx, FromTxWithEncoded};
-use alloy_op_evm::block::OpTxEnv;
-use op_alloy_consensus::OpTxEnvelope;
-use op_revm::OpSpecId;
-use revm::context::BlockEnv;
 
 use kona_proof::{l1::OracleBlobProvider, BootInfo, FlushableCache};
 
@@ -112,10 +107,11 @@ async fn main() -> anyhow::Result<()> {
     let client_task = task::spawn(run_witgen_and_zk_verification(
         OracleReader::new(preimage.client.clone()),
         HintWriter::new(hint.client.clone()),
-        FpvmOpEvmFactory::new(
+        FpvmMegaEvmFactory::new(
             HintWriter::new(hint.client),
             OracleReader::new(preimage.client),
-        ),
+        )
+        .build_factory(),
         canoe_provider,
         canoe_verifier,
         canoe_address_fetcher,
@@ -134,10 +130,10 @@ async fn main() -> anyhow::Result<()> {
 /// The second round uses the populated witness to run against
 #[allow(clippy::type_complexity)]
 #[allow(unused_variables)]
-pub async fn run_witgen_and_zk_verification<P, H, Evm>(
+pub async fn run_witgen_and_zk_verification<P, H>(
     oracle_client: P,
     hint_client: H,
-    evm_factory: Evm,
+    evm_factory: LazyMegaEvmFactory,
     canoe_provider: impl CanoeProvider,
     canoe_verifier: impl CanoeVerifier,
     canoe_address_fetcher: impl CanoeVerifierAddressFetcher,
@@ -145,9 +141,6 @@ pub async fn run_witgen_and_zk_verification<P, H, Evm>(
 where
     P: PreimageOracleClient + Send + Sync + Debug + Clone,
     H: HintWriterClient + Send + Sync + Debug + Clone,
-    Evm: EvmFactory<Spec = OpSpecId, BlockEnv = BlockEnv> + Send + Sync + Debug + Clone + 'static,
-    <Evm as EvmFactory>::Tx:
-        FromTxWithEncoded<OpTxEnvelope> + FromRecoveredTx<OpTxEnvelope> + OpTxEnv,
 {
     const ORACLE_LRU_SIZE: usize = 1024;
 
@@ -183,17 +176,14 @@ where
 
 /// used internal
 #[allow(clippy::type_complexity)]
-pub async fn prepare_witness<O, Evm>(
+pub async fn prepare_witness<O>(
     oracle: Arc<O>,
-    evm_factory: Evm,
+    evm_factory: LazyMegaEvmFactory,
     canoe_provider: impl CanoeProvider,
     canoe_address_fetcher: impl CanoeVerifierAddressFetcher,
 ) -> anyhow::Result<EigenDAWitness>
 where
     O: CommsClient + FlushableCache + Send + Sync + Debug,
-    Evm: EvmFactory<Spec = OpSpecId, BlockEnv = BlockEnv> + Send + Sync + Debug + Clone + 'static,
-    <Evm as EvmFactory>::Tx:
-        FromTxWithEncoded<OpTxEnvelope> + FromRecoveredTx<OpTxEnvelope> + OpTxEnv,
 {
     // Run derivation for the first time to populate the witness data
     let eigenda_preimage: EigenDAPreimage =
@@ -234,15 +224,12 @@ where
 ///    with monomial SRS basis yields to the same KZG commitment)
 /// 2. the cert is correct
 #[allow(clippy::type_complexity)]
-pub async fn run_preimage_client<O, Evm>(
+pub async fn run_preimage_client<O>(
     oracle: Arc<O>,
-    evm_factory: Evm,
+    evm_factory: LazyMegaEvmFactory,
 ) -> Result<EigenDAPreimage, FaultProofProgramError>
 where
     O: CommsClient + FlushableCache + Send + Sync + Debug,
-    Evm: EvmFactory<Spec = OpSpecId, BlockEnv = BlockEnv> + Send + Sync + Debug + Clone + 'static,
-    <Evm as EvmFactory>::Tx:
-        FromTxWithEncoded<OpTxEnvelope> + FromRecoveredTx<OpTxEnvelope> + OpTxEnv,
 {
     let beacon = OracleBlobProvider::new(oracle.clone());
 
@@ -266,18 +253,15 @@ where
 // For op-succinct, the check is at https://github.com/succinctlabs/op-succinct/blob/b0f190e634ab5b03a3028d4ef88e207186b48337/programs/range/eigenda/src/main.rs#L32
 // The ZKVM will convert EigenDAWitness into PreloadedEigenDAPreimageProvider which contains all the verified EigenDA preimage data
 #[allow(clippy::type_complexity)]
-pub async fn run_within_zkvm_assume_oracle_verified<O, Evm>(
+pub async fn run_within_zkvm_assume_oracle_verified<O>(
     oracle: Arc<O>,
-    evm_factory: Evm,
+    evm_factory: LazyMegaEvmFactory,
     canoe_verifier: impl CanoeVerifier,
     canoe_address_fetcher: impl CanoeVerifierAddressFetcher,
     witness: EigenDAWitness,
 ) -> anyhow::Result<()>
 where
     O: CommsClient + FlushableCache + Send + Sync + Debug,
-    Evm: EvmFactory<Spec = OpSpecId, BlockEnv = BlockEnv> + Send + Sync + Debug + Clone + 'static,
-    <Evm as EvmFactory>::Tx:
-        FromTxWithEncoded<OpTxEnvelope> + FromRecoveredTx<OpTxEnvelope> + OpTxEnv,
 {
     info!("start the code supposed to run inside zkVM");
 
