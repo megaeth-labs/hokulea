@@ -3743,10 +3743,12 @@ version = "0.1.0"
 dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-rlp",
+ "alloy-sol-types",
  "anyhow",
  "canoe-bindings",
  "rkyv",
  "serde",
+ "serde_json",
  "thiserror 2.0.17",
 ]
 
@@ -4664,10 +4666,14 @@ dependencies = [
  "alloy-primitives 1.4.1",
  "ark-bn254",
  "ark-serialize 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "eigenda-cert",
+ "hokulea-eigenda",
  "hokulea-proof",
  "num",
  "rust-kzg-bn254-primitives",
  "rust-kzg-bn254-prover",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -4684,7 +4690,6 @@ dependencies = [
  "kona-genesis",
  "kona-protocol",
  "rkyv",
- "rust-kzg-bn254-primitives",
  "serde",
  "thiserror 2.0.17",
  "tokio",
@@ -4731,6 +4736,7 @@ dependencies = [
  "clap",
  "eigenda-cert",
  "hokulea-client-bin",
+ "hokulea-compute-proof",
  "hokulea-eigenda",
  "hokulea-proof",
  "kona-cli",
@@ -4740,6 +4746,7 @@ dependencies = [
  "kona-proof",
  "kona-std-fpvm",
  "reqwest",
+ "rust-kzg-bn254-primitives",
  "serde",
  "thiserror 2.0.17",
  "tokio",
