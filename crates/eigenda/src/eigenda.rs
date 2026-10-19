@@ -251,12 +251,12 @@ where
         self.ethereum_source.clear();
     }
 
-    fn seed_activation_phase(&mut self, phase: ActivationPhase) {
+    fn seed_activation_phase(&mut self, phase: ActivationPhase) -> PipelineResult<()> {
         // A pending certified commitment was read before the reset's base, which the inbox no
         // longer serves under the recovered phase. Only certified items set it, so the legacy
         // path keeps its behaviour.
         self.certified_commitment = None;
-        self.ethereum_source.seed_activation_phase(phase);
+        self.ethereum_source.seed_activation_phase(phase)
     }
 }
 
@@ -1115,6 +1115,7 @@ mod tests {
     struct ScriptedInbox {
         items: VecDeque<InboxData>,
         seeded_phase: Option<ActivationPhase>,
+        refuses_seed: bool,
     }
 
     #[async_trait]
@@ -1129,8 +1130,12 @@ mod tests {
             self.items.clear();
         }
 
-        fn seed_activation_phase(&mut self, phase: ActivationPhase) {
+        fn seed_activation_phase(&mut self, phase: ActivationPhase) -> PipelineResult<()> {
             self.seeded_phase = Some(phase);
+            if self.refuses_seed {
+                return Err(PipelineError::Eof.crit());
+            }
+            Ok(())
         }
     }
 
@@ -1146,6 +1151,7 @@ mod tests {
             ScriptedInbox {
                 items: items.into(),
                 seeded_phase: None,
+                refuses_seed: false,
             },
             default_test_preimage_source(),
         )
@@ -1302,7 +1308,9 @@ mod tests {
         assert!(source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.is_err());
         assert_eq!(source.certified_commitment.as_ref(), Some(&commitment));
 
-        source.seed_activation_phase(ActivationPhase::Unscheduled);
+        source
+            .seed_activation_phase(ActivationPhase::Unscheduled)
+            .unwrap();
 
         assert!(source.certified_commitment.is_none());
         assert_eq!(
@@ -1312,6 +1320,13 @@ mod tests {
         assert_eq!(
             source.next(&BLOCK_INFO, BATCHER_ADDRESS).await,
             Ok(legacy(Bytes::from_static(&[0x00, 0xaa])))
+        );
+
+        // The inbox reader's refusal of the phase reaches the reset.
+        source.ethereum_source.refuses_seed = true;
+        assert_eq!(
+            source.seed_activation_phase(ActivationPhase::Unscheduled),
+            Err(PipelineError::Eof.crit())
         );
     }
 
