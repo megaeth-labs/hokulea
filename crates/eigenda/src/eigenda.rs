@@ -6,12 +6,12 @@ use eigenda_cert::{AltDACommitment, CertifiedCommitment};
 use kona_derive::PipelineErrorKind;
 
 use alloc::{boxed::Box, fmt::Debug};
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::Address;
 use async_trait::async_trait;
 use core::marker::PhantomData;
 use kona_derive::{
-    BlobProvider, ChainProvider, DataAvailabilityProvider, EthereumDataSource, InboxData,
-    PipelineError, PipelineResult,
+    ActivationPhase, BlobProvider, ChainProvider, DataAvailabilityProvider, EthereumDataSource,
+    InboxData, PipelineError, PipelineResult,
 };
 use kona_protocol::BlockInfo;
 use tracing::{error, warn};
@@ -83,7 +83,7 @@ where
         &mut self,
         commitment: CertifiedCommitment,
         l1_inclusion_bn: u64,
-    ) -> PipelineResult<Bytes> {
+    ) -> PipelineResult<InboxData> {
         match self
             .eigenda_source
             .next_certified(&commitment, l1_inclusion_bn)
@@ -91,7 +91,12 @@ where
         {
             Ok(payload) => {
                 self.certified_commitment = None;
-                Ok(payload)
+                // The frame queue tags the payload's frames with this flag, so the channel and
+                // batch stages apply the certified rules to them.
+                Ok(InboxData {
+                    data: payload,
+                    certified: true,
+                })
             }
             Err(HokuleaErrorKind::Temporary(e)) => {
                 warn!(
@@ -120,7 +125,7 @@ where
     A: EigenDAPreimageProvider + Send + Sync + Clone + Debug,
     S: DataAvailabilityProvider<Item = InboxData> + Send + Sync + Debug,
 {
-    type Item = Bytes;
+    type Item = InboxData;
 
     async fn next(
         &mut self,
@@ -174,7 +179,7 @@ where
 
             // it is not intended for altDA
             if local_data[0] != ALTDA_DERIVATION_VERSION {
-                return Ok(local_data);
+                return Ok(local_data.into());
             }
 
             match self.eigenda_source.parse(&local_data) {
@@ -226,7 +231,7 @@ where
                     Ok(c) => {
                         // EigenLabs branch https://github.com/Layr-Labs/optimism/blob/34e5ce8416de529b8a57b0c55e1635ebe89805dc/op-node/rollup/derive/altda_data_source.go#L117
                         self.altda_commitment = None;
-                        return Ok(c);
+                        return Ok(c.into());
                     }
                     Err(e) => {
                         // encoded payload cannot be decoded, data is discarded and try next one
@@ -245,6 +250,14 @@ where
         self.certified_commitment = None;
         self.ethereum_source.clear();
     }
+
+    fn seed_activation_phase(&mut self, phase: ActivationPhase) {
+        // A pending certified commitment was read before the reset's base, which the inbox no
+        // longer serves under the recovered phase. Only certified items set it, so the legacy
+        // path keeps its behaviour.
+        self.certified_commitment = None;
+        self.ethereum_source.seed_activation_phase(phase);
+    }
 }
 
 #[cfg(test)]
@@ -258,7 +271,7 @@ mod tests {
     use alloc::vec::Vec;
     use alloc::{collections::VecDeque, vec};
     use alloy_consensus::TxEnvelope;
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::{Bytes, B256, U256};
     use alloy_rlp::Decodable;
     use eigenda_cert::certified::test_utils::certified_calldata;
     use eigenda_cert::{AltDACommitment, G1Point};
@@ -597,7 +610,7 @@ mod tests {
         // encoded payload corresponding to the data
         let payload = encoded_payloads[0].decode().unwrap();
 
-        assert!(data == payload);
+        assert_eq!(data, InboxData::from(payload));
     }
 
     // inject temporary errors eigenda preimage, before finally derive output
@@ -644,7 +657,10 @@ mod tests {
 
         // altda commitment is consumed
         assert!(source.altda_commitment.is_none());
-        assert!(payload == encoded_payloads[0].decode().unwrap());
+        assert_eq!(
+            payload,
+            InboxData::from(encoded_payloads[0].decode().unwrap())
+        );
     }
 
     // Eth failover
@@ -994,7 +1010,10 @@ mod tests {
             }
             for i in 0..scenario.results.len() {
                 match source.next(&block_info, BATCHER_ADDRESS).await {
-                    Ok(payload) => assert_eq!(Ok(payload), scenario.results[i]),
+                    Ok(payload) => {
+                        assert!(!payload.certified);
+                        assert_eq!(Ok(payload.data), scenario.results[i]);
+                    }
                     Err(e) => assert_eq!(Err(e), scenario.results[i]),
                 }
                 assert_eq!(
@@ -1067,7 +1086,10 @@ mod tests {
         }
         for i in 0..scenario.results.len() {
             match source.next(&block_info, BATCHER_ADDRESS).await {
-                Ok(payload) => assert_eq!(Ok(payload), scenario.results[i]),
+                Ok(payload) => {
+                    assert!(!payload.certified);
+                    assert_eq!(Ok(payload.data), scenario.results[i]);
+                }
                 Err(e) => assert_eq!(Err(e), scenario.results[i]),
             }
             assert_eq!(
@@ -1092,6 +1114,7 @@ mod tests {
     #[derive(Debug, Clone, Default)]
     struct ScriptedInbox {
         items: VecDeque<InboxData>,
+        seeded_phase: Option<ActivationPhase>,
     }
 
     #[async_trait]
@@ -1104,6 +1127,10 @@ mod tests {
 
         fn clear(&mut self) {
             self.items.clear();
+        }
+
+        fn seed_activation_phase(&mut self, phase: ActivationPhase) {
+            self.seeded_phase = Some(phase);
         }
     }
 
@@ -1118,6 +1145,7 @@ mod tests {
         EigenDADataSource::with_inbox_source(
             ScriptedInbox {
                 items: items.into(),
+                seeded_phase: None,
             },
             default_test_preimage_source(),
         )
@@ -1154,7 +1182,7 @@ mod tests {
         EncodedPayload::encode(CERTIFIED_PAYLOAD).unwrap()
     }
 
-    fn is_skip(result: &PipelineResult<Bytes>) -> bool {
+    fn is_skip(result: &PipelineResult<InboxData>) -> bool {
         matches!(
             result,
             Err(PipelineErrorKind::Temporary(PipelineError::NotEnoughData))
@@ -1171,7 +1199,7 @@ mod tests {
             .insert_certified_payload(&commitment, Ok(certified_payload()));
 
         let payload = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.unwrap();
-        assert_eq!(payload[..], CERTIFIED_PAYLOAD[..]);
+        assert_eq!(payload, certified(Bytes::from_static(CERTIFIED_PAYLOAD)));
         assert_eq!(
             source.eigenda_source.eigenda_fetcher.certified_requests,
             vec![(commitment.body().clone(), BLOCK_INFO.number)]
@@ -1214,7 +1242,7 @@ mod tests {
             .certified_requests
             .is_empty());
         let payload = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.unwrap();
-        assert_eq!(payload[..], CERTIFIED_PAYLOAD[..]);
+        assert_eq!(payload, certified(Bytes::from_static(CERTIFIED_PAYLOAD)));
     }
 
     /// A temporary provider error keeps the decoded commitment: the retry resolves the same one
@@ -1243,7 +1271,7 @@ mod tests {
             .eigenda_fetcher
             .insert_certified_payload(&commitment, Ok(certified_payload()));
         let payload = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.unwrap();
-        assert_eq!(payload[..], CERTIFIED_PAYLOAD[..]);
+        assert_eq!(payload, certified(Bytes::from_static(CERTIFIED_PAYLOAD)));
         assert_eq!(
             source
                 .eigenda_source
@@ -1254,7 +1282,36 @@ mod tests {
         );
         assert_eq!(
             source.next(&BLOCK_INFO, BATCHER_ADDRESS).await,
-            Ok(Bytes::from_static(&[0x00, 0xaa]))
+            Ok(legacy(Bytes::from_static(&[0x00, 0xaa])))
+        );
+    }
+
+    /// A reset seeds the inbox reader with the recovered phase and drops a certified commitment
+    /// read before the reset's base, so the next call reads a fresh item instead of retrying it.
+    #[tokio::test]
+    async fn activation_seed_drops_the_pending_certified_commitment() {
+        let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
+        let mut source = scripted_source(vec![
+            certified(calldata),
+            legacy(Bytes::from_static(&[0x00, 0xaa])),
+        ]);
+        source
+            .eigenda_source
+            .eigenda_fetcher
+            .insert_certified_payload(&commitment, Err(TestHokuleaProviderError::Preimage));
+        assert!(source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.is_err());
+        assert_eq!(source.certified_commitment.as_ref(), Some(&commitment));
+
+        source.seed_activation_phase(ActivationPhase::Unscheduled);
+
+        assert!(source.certified_commitment.is_none());
+        assert_eq!(
+            source.ethereum_source.seeded_phase,
+            Some(ActivationPhase::Unscheduled)
+        );
+        assert_eq!(
+            source.next(&BLOCK_INFO, BATCHER_ADDRESS).await,
+            Ok(legacy(Bytes::from_static(&[0x00, 0xaa])))
         );
     }
 
@@ -1325,7 +1382,7 @@ mod tests {
             .is_empty());
         assert_eq!(
             source.next(&BLOCK_INFO, BATCHER_ADDRESS).await,
-            Ok(Bytes::from_static(&[0x00, 0xaa]))
+            Ok(legacy(Bytes::from_static(&[0x00, 0xaa])))
         );
     }
 
@@ -1360,7 +1417,7 @@ mod tests {
             .insert_certified_payload(&commitment, Ok(certified_payload()));
 
         let payload = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.unwrap();
-        assert_eq!(payload[..], CERTIFIED_PAYLOAD[..]);
+        assert_eq!(payload, certified(Bytes::from_static(CERTIFIED_PAYLOAD)));
         assert!(is_skip(&source.next(&BLOCK_INFO, BATCHER_ADDRESS).await));
         assert_eq!(
             source.eigenda_source.eigenda_fetcher.certified_requests,
