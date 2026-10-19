@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use eigenda_cert::AltDACommitment;
+use eigenda_cert::{AltDACommitment, CertifiedCommitment};
 use hokulea_eigenda::{EigenDAPreimageProvider, EncodedPayload};
 use hokulea_proof::eigenda_witness::EigenDAPreimage;
 use std::sync::{Arc, Mutex};
@@ -61,5 +61,22 @@ impl<T: EigenDAPreimageProvider + Send> EigenDAPreimageProvider
             }
             Err(e) => Err(e),
         }
+    }
+
+    async fn get_certified_encoded_payload(
+        &mut self,
+        commitment: &CertifiedCommitment,
+        l1_inclusion_block_number: u64,
+    ) -> Result<EncodedPayload, Self::Error> {
+        let encoded_payload = self
+            .provider
+            .get_certified_encoded_payload(commitment, l1_inclusion_block_number)
+            .await?;
+        self.preimage
+            .lock()
+            .unwrap()
+            .certified_payloads
+            .push((commitment.clone(), encoded_payload.clone()));
+        Ok(encoded_payload)
     }
 }

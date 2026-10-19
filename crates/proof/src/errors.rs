@@ -1,3 +1,4 @@
+use alloc::string::ToString;
 use hokulea_eigenda::HokuleaErrorKind;
 use kona_preimage::errors::PreimageOracleError;
 
@@ -8,11 +9,20 @@ pub enum HokuleaOracleProviderError {
     /// <https://github.com/op-rs/kona/blob/174b2ac5ad3756d4469553c7777b04056f9d151c/crates/proof/proof/src/errors.rs#L18>
     #[error("Preimage oracle error: {0}")]
     Preimage(#[from] PreimageOracleError),
+    /// The host served a certified encoded payload whose KZG proof does not bind it to the
+    /// certificate's blob commitment. The host must never serve one, so nothing can be retried.
+    #[error("certified encoded payload is not bound to the certificate's blob commitment")]
+    UnboundCertifiedPayload,
 }
 
 impl From<HokuleaOracleProviderError> for HokuleaErrorKind {
     fn from(val: HokuleaOracleProviderError) -> Self {
-        let HokuleaOracleProviderError::Preimage(err) = val;
+        let err = match val {
+            HokuleaOracleProviderError::Preimage(err) => err,
+            HokuleaOracleProviderError::UnboundCertifiedPayload => {
+                return HokuleaErrorKind::Critical(val.to_string())
+            }
+        };
         match err {
             // since the bidirectional channel already closed, the system must restart to recover
             // therefore return critical. We make a special case for PreimageOracleError

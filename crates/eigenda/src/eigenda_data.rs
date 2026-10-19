@@ -13,6 +13,11 @@ use serde::{Deserialize, Serialize};
 /// Represents raw payload bytes, alias
 pub type Payload = Bytes;
 
+/// A payload whose length does not fit the u32 length field of the encoded payload header.
+#[derive(Debug, Clone, Copy, thiserror::Error, PartialEq, Eq)]
+#[error("payload of {0} bytes does not fit the u32 length header")]
+pub struct PayloadTooLarge(pub usize);
+
 #[derive(Default, Clone, Debug, Deserialize, Serialize, PartialEq)] //
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)] //
 // [EigenDAWitness] requires serde for EncodedPayload
@@ -30,6 +35,30 @@ impl EncodedPayload {
         Self {
             encoded_payload: bytes,
         }
+    }
+
+    /// Encodes a payload under PAYLOAD_ENCODING_VERSION_0, which is what an EigenDA dispersal of
+    /// it commits to: a header field element `[0x00, version, len as u32 big-endian, 0 ..]`, then
+    /// the payload in 31-byte chunks behind a zero byte each, zero-filled until the field element
+    /// count is a power of two. The inverse of [Self::decode]; the same encoding as op-node's
+    /// `eigenda/payload.go` and <https://layr-labs.github.io/eigenda/integration/spec/3-data-structs.html#encoding-payload-version-0x0>.
+    pub fn encode(payload: &[u8]) -> Result<Self, PayloadTooLarge> {
+        let payload_len =
+            u32::try_from(payload.len()).map_err(|_| PayloadTooLarge(payload.len()))?;
+        let chunk_len = BYTES_PER_FIELD_ELEMENT - 1;
+        let field_elements = (1 + payload.len().div_ceil(chunk_len)).next_power_of_two();
+
+        let mut encoded = vec![0u8; field_elements * BYTES_PER_FIELD_ELEMENT];
+        encoded[1] = PAYLOAD_ENCODING_VERSION_0;
+        encoded[2..6].copy_from_slice(&payload_len.to_be_bytes());
+        for (i, chunk) in payload.chunks(chunk_len).enumerate() {
+            // field element i + 1, after its leading zero byte
+            let start = (i + 1) * BYTES_PER_FIELD_ELEMENT + 1;
+            encoded[start..start + chunk.len()].copy_from_slice(chunk);
+        }
+        Ok(Self {
+            encoded_payload: encoded.into(),
+        })
     }
 
     /// Returns the raw bytes of the encoded payload.
@@ -202,53 +231,11 @@ mod tests {
     use super::*;
     use alloc::vec;
     use alloy_primitives::Bytes;
-    use rust_kzg_bn254_primitives::helpers;
-
-    /// The encode function accepts an input of opaque rollup data array into an [EncodedPayload].
-    /// [EncodedPayload] contains a header of 32 bytes and a transformation of input data
-    /// The 0 index byte of header is always 0, to comply to bn254 field element constraint
-    /// The 1 index byte of header is proxy encoding version.
-    /// The 2-5(inclusive) indices of header are storing the length of the input rollup data in big endien
-    /// The payload is prepared by padding an empty byte for every 31 bytes from the rollup data
-    /// This matches exactly the eigenda proxy implementation, whose logic is in
-    /// <https://github.com/Layr-Labs/eigenda/blob/master/encoding/utils/codec/codec.go#L12>
-    ///
-    /// The length of (header + payload) by the encode function is always multiple of 32
-    /// The eigenda proxy does not take such constraint.
-    /// See also spec <https://layr-labs.github.io/eigenda/integration/spec/3-data-structs.html#encoding-payload-version-0x0>
-    /// for the exact encoding methods.
-    fn encode(rollup_data: &[u8], payload_encoding_version: u8) -> EncodedPayload {
-        let rollup_data_size = rollup_data.len() as u32;
-
-        let padded_rollup_data = helpers::pad_payload(rollup_data);
-
-        let min_blob_payload_size = padded_rollup_data.len();
-
-        // the first field element contains the header
-        let blob_size = min_blob_payload_size + BYTES_PER_FIELD_ELEMENT;
-
-        // round up to the closest multiple of 32
-        let blob_size = blob_size.div_ceil(BYTES_PER_FIELD_ELEMENT) * BYTES_PER_FIELD_ELEMENT;
-
-        let mut encoded_payload = vec![0u8; blob_size as usize];
-
-        encoded_payload[1] = payload_encoding_version;
-        // encode length as uint32
-        encoded_payload[2..6].copy_from_slice(&rollup_data_size.to_be_bytes());
-
-        encoded_payload
-            [BYTES_PER_FIELD_ELEMENT..(BYTES_PER_FIELD_ELEMENT + min_blob_payload_size as usize)]
-            .copy_from_slice(&padded_rollup_data);
-
-        EncodedPayload {
-            encoded_payload: Bytes::from(encoded_payload),
-        }
-    }
 
     #[test]
     fn test_encode_and_decode_success() {
         let rollup_data = vec![1, 2, 3, 4];
-        let encoded_payload = encode(&rollup_data, PAYLOAD_ENCODING_VERSION_0);
+        let encoded_payload = EncodedPayload::encode(&rollup_data).unwrap();
         let data_len = encoded_payload.encoded_payload.len();
         assert!(data_len % BYTES_PER_FIELD_ELEMENT == 0 && data_len != 0);
 
@@ -257,10 +244,29 @@ mod tests {
         assert_eq!(result.unwrap(), Bytes::from(rollup_data));
     }
 
+    /// The field element count is one header element plus one per started 31-byte chunk, rounded
+    /// up to a power of two: what a certificate's `blobHeader.commitment.length` carries.
+    #[test]
+    fn test_encode_field_element_count() {
+        for (payload_len, field_elements) in [(0, 1), (1, 2), (31, 2), (32, 4), (93, 4), (94, 8)] {
+            let payload: vec::Vec<u8> = (0..payload_len).map(|i| i as u8 | 1).collect();
+            let encoded = EncodedPayload::encode(&payload).unwrap();
+            assert_eq!(encoded.num_field_element(), field_elements, "{payload_len}");
+            assert_eq!(encoded.decode().unwrap(), Bytes::from(payload));
+        }
+
+        let encoded = EncodedPayload::encode(&[0xab; 32]).unwrap();
+        let mut expected = [0u8; 128];
+        expected[5] = 32;
+        expected[33..64].copy_from_slice(&[0xab; 31]);
+        expected[65] = 0xab;
+        assert_eq!(encoded.serialize()[..], expected[..]);
+    }
+
     #[test]
     fn test_encode_and_decode_success_empty() {
         let rollup_data = vec![];
-        let encoded_payload = encode(&rollup_data, PAYLOAD_ENCODING_VERSION_0);
+        let encoded_payload = EncodedPayload::encode(&rollup_data).unwrap();
         let data_len = encoded_payload.encoded_payload.len();
         // 32 byte is encoded payload header size
         assert!(data_len == 32);
@@ -273,7 +279,7 @@ mod tests {
     #[test]
     fn test_encode_and_decode_error_invalid_length() {
         let rollup_data = vec![1, 2, 3, 4];
-        let mut encoded_payload = encode(&rollup_data, PAYLOAD_ENCODING_VERSION_0);
+        let mut encoded_payload = EncodedPayload::encode(&rollup_data).unwrap();
         encoded_payload.encoded_payload.truncate(33);
         let result = encoded_payload.decode();
         assert!(result.is_err());
@@ -286,7 +292,7 @@ mod tests {
     #[test]
     fn test_serde_on_encoded_payload() {
         let rollup_data = vec![1, 2, 3, 4];
-        let encoded_payload = encode(&rollup_data, PAYLOAD_ENCODING_VERSION_0);
+        let encoded_payload = EncodedPayload::encode(&rollup_data).unwrap();
         let ser = encoded_payload.serialize();
         let deserialized_encoded_payload = EncodedPayload::deserialize(ser.clone());
         assert_eq!(encoded_payload, deserialized_encoded_payload);
