@@ -458,6 +458,63 @@ mod tests {
         }
     }
 
+    const ATTESTED: &str = include_str!("../testdata/attested_certified.json");
+
+    #[derive(Deserialize)]
+    struct AttestedVector {
+        generated_by: String,
+        cases: Vec<AttestedCase>,
+    }
+
+    #[derive(Deserialize)]
+    struct AttestedCase {
+        name: String,
+        calldata: String,
+        eigenda_cert: String,
+        blob_commitment_hash: String,
+        commitment_x: String,
+        commitment_y: String,
+        length: u32,
+    }
+
+    /// Every other positive case here is built by [certified_calldata], which hashes the blob
+    /// commitment with this crate's own encoder: had `canoe_bindings`' BlobCommitment a layout
+    /// other than the eleven words mega-block-certifier's `_blobCommitmentHash` hashes, they would
+    /// all pass while every real batch was skipped. These certificates and hashes are Solidity's.
+    #[test]
+    fn solidity_attested_certificates_are_accepted() {
+        let v: AttestedVector = serde_json::from_str(ATTESTED).unwrap();
+        assert!(v.generated_by.contains("GenAttestedCertified.s.sol"));
+        assert_eq!(v.cases.len(), 2);
+        for case in &v.cases {
+            let cert =
+                canoe_bindings::EigenDACertV3::abi_decode_validate(&unhex(&case.eigenda_cert))
+                    .unwrap();
+            let blob = cert.blobInclusionInfo.blobCertificate.blobHeader.commitment;
+            assert_eq!(
+                keccak256(blob.abi_encode())[..],
+                unhex(&case.blob_commitment_hash)[..],
+                "{}: Rust's commitment hash is not Solidity's",
+                case.name
+            );
+
+            let commitment = CertifiedCommitment::from_calldata(&unhex(&case.calldata))
+                .unwrap_or_else(|e| panic!("{} must be certified: {e}", case.name));
+            assert_eq!(
+                *commitment.blob(),
+                AttestedBlob {
+                    commitment: G1Point {
+                        x: U256::from_be_slice(&unhex(&case.commitment_x)),
+                        y: U256::from_be_slice(&unhex(&case.commitment_y)),
+                    },
+                    length: case.length,
+                },
+                "{}",
+                case.name
+            );
+        }
+    }
+
     fn point() -> G1Point {
         G1Point {
             x: U256::from(0x1234),
