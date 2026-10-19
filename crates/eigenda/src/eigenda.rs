@@ -331,7 +331,7 @@ mod tests {
         block_info: &BlockInfo,
     ) -> (Vec<TxEnvelope>, Vec<AltDACommitment>, Vec<EncodedPayload>) {
         // inbox addr
-        source.ethereum_source.blob_source.batcher_address = L1_INBOX_ADDRESS;
+        source.ethereum_source.blob_source.batch_inbox = L1_INBOX_ADDRESS.into();
         let (txs, altda_commitments, encoded_payloads) =
             valid_eip1559_txs_with_altda_commitment_encoded_payload(num);
         source
@@ -465,7 +465,7 @@ mod tests {
         let mut source = default_test_eigenda_data_source();
         let block_info = BlockInfo::default();
         // inbox addr
-        source.ethereum_source.blob_source.batcher_address = L1_INBOX_ADDRESS;
+        source.ethereum_source.blob_source.batch_inbox = L1_INBOX_ADDRESS.into();
 
         let (txs, _, _) = valid_eip1559_txs_with_altda_commitment_encoded_payload(1);
         source
@@ -566,8 +566,8 @@ mod tests {
         let mut source = default_test_eigenda_data_source();
         let block_info = BlockInfo::default();
         // inbox addr
-        source.ethereum_source.blob_source.batcher_address =
-            alloy_primitives::address!("0xffeeddccbbaa0000000000000000000000000000");
+        source.ethereum_source.blob_source.batch_inbox =
+            alloy_primitives::address!("0xffeeddccbbaa0000000000000000000000000000").into();
         let txs = valid_eip1559_txs_with_ethda();
         // inject invalid 1559 transaction
         source
@@ -595,8 +595,8 @@ mod tests {
         let mut source = default_test_eigenda_data_source();
         let block_info = BlockInfo::default();
         // inbox addr
-        source.ethereum_source.blob_source.batcher_address =
-            alloy_primitives::address!("0xc25276A375ec96e7F494A04e4f74a1d4C3EE223A");
+        source.ethereum_source.blob_source.batch_inbox =
+            alloy_primitives::address!("0xc25276A375ec96e7F494A04e4f74a1d4C3EE223A").into();
         // https://sepolia.etherscan.io/tx/0x717e912c4bd0ead87819d8f36ce9e6efc14255900560c6bc05b77dfb7fdb9dc8
         let raw_tx = alloy_primitives::hex::decode("0x02f87583aa36a7098459682f008459bb530b82520894c25276a375ec96e7f494a04e4f74a1d4c3ee223a8803782dace9d9000080c001a08737f84218a42d53cb3ec202fae278a881ddbe9f5e1740ccbdfd5bd74c9878e4a0714b7b5f2f73d6fa6c3edd1474928c678d0f18e96ec9143d1b961c3cd6240d2a").unwrap();
         let eip1559 = TxEnvelope::decode(&mut raw_tx.as_slice()).unwrap();
@@ -628,8 +628,8 @@ mod tests {
         let mut source = default_test_eigenda_data_source();
         let block_info = BlockInfo::default();
         // inbox addr
-        source.ethereum_source.blob_source.batcher_address =
-            alloy_primitives::address!("0x582D8c8675f58430581F2aEd0BE486Bf2576D8DA");
+        source.ethereum_source.blob_source.batch_inbox =
+            alloy_primitives::address!("0x582D8c8675f58430581F2aEd0BE486Bf2576D8DA").into();
         // https://sepolia.etherscan.io/tx/0xcad3c60b0de05a09ba1c91777ee8b218ba1c1ff74d6996ecf8569b951bf03196
         let raw_tx = alloy_primitives::hex::decode("0x02f89b83aa36a783026826843b9aca0084b2d05e0082582a94582d8c8675f58430581f2aed0be486bf2576d8da80ab01010ccedd8300000000001d24960a699284cc26f4ec4d2f22eca56b6401f4225f4b3785818ff7cdb1273ac080a016ee79d3de3df53c4a2687036a39017676cbaa016a143be8e435bcda056fd6a2a066e7987856632908c57339a0e6da0a340c8633e8a9a5f4cf38a0cafec4e3b1e4").unwrap();
         let eip1559 = TxEnvelope::decode(&mut raw_tx.as_slice()).unwrap();
