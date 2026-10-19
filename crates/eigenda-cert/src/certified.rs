@@ -208,11 +208,16 @@ fn decode_body(body: &[u8]) -> Result<BatchCommitment, CertifiedCommitmentError>
 
 /// Reads the certificate's blob commitment and holds it to the attestation:
 /// `eigenda_commitment == keccak256(abi.encode(cert.blobInclusionInfo.blobCertificate.blobHeader.commitment))`.
+///
+/// The decode validates words the way op-node's go-ethereum `Unpack` does: a `uint16` or `uint32`
+/// word with dirty high bits is refused, not truncated. Truncating would re-encode clean, so a
+/// commitment op-node skips would match here. EigenDACertV3 holds no address, bool, short
+/// `bytesN` or string, so alloy's validation checks nothing go-ethereum does not.
 fn attested_blob(
     cert: &[u8],
     eigenda_commitment: &[u8],
 ) -> Result<AttestedBlob, CertifiedCommitmentError> {
-    let cert = canoe_bindings::EigenDACertV3::abi_decode(cert)
+    let cert = canoe_bindings::EigenDACertV3::abi_decode_validate(cert)
         .map_err(|_| CertifiedCommitmentError::CertDecode)?;
     let blob = cert.blobInclusionInfo.blobCertificate.blobHeader.commitment;
     if keccak256(blob.abi_encode()).as_slice() != eigenda_commitment {
@@ -503,6 +508,34 @@ mod tests {
     fn certificate_must_decode() {
         let digest = keccak256(blob_commitment(point(), 4).abi_encode());
         let body = batch_commitment_body(vec![0xbe, 0xef], digest.to_vec());
+        assert_eq!(
+            CertifiedCommitment::from_body(&body),
+            Err(CertifiedCommitmentError::CertDecode)
+        );
+    }
+
+    /// op-node's go-ethereum `Unpack` refuses a `uint32` word above `2^32 - 1`, so a certificate
+    /// whose blob length carries dirty high bits is skipped there even when the attestation is the
+    /// digest of the clean re-encoding. Reading the low four bytes here would accept it and fork.
+    #[test]
+    fn dirty_narrow_int_in_certificate_is_refused() {
+        let length = 0x7a3c_51e9;
+        let mut cert = eigenda_cert(point(), length);
+        let mut clean_word = [0u8; 32];
+        clean_word[28..].copy_from_slice(&length.to_be_bytes());
+        let at: Vec<usize> = (0..cert.len())
+            .step_by(32)
+            .filter(|&i| cert[i..i + 32] == clean_word)
+            .collect();
+        assert_eq!(
+            at.len(),
+            1,
+            "the length word must be unique in the certificate"
+        );
+        cert[at[0] + 27] = 0x01;
+
+        let clean_digest = keccak256(blob_commitment(point(), length).abi_encode());
+        let body = batch_commitment_body(cert, clean_digest.to_vec());
         assert_eq!(
             CertifiedCommitment::from_body(&body),
             Err(CertifiedCommitmentError::CertDecode)
