@@ -22,7 +22,7 @@ pub use traits::{
 };
 
 mod eigenda;
-pub use eigenda::{EigenDADataSource, InboxDataSource, InboxItem};
+pub use eigenda::EigenDADataSource;
 
 mod eigenda_preimage;
 pub use eigenda_preimage::EigenDAPreimageSource;

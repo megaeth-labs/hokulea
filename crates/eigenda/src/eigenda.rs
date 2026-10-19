@@ -10,61 +10,11 @@ use alloy_primitives::{Address, Bytes};
 use async_trait::async_trait;
 use core::marker::PhantomData;
 use kona_derive::{
-    BlobProvider, ChainProvider, DataAvailabilityProvider, EthereumDataSource, PipelineError,
-    PipelineResult,
+    BlobProvider, ChainProvider, DataAvailabilityProvider, EthereumDataSource, InboxData,
+    PipelineError, PipelineResult,
 };
 use kona_protocol::BlockInfo;
 use tracing::{error, warn};
-
-/// One batcher inbox item, tagged with the rules derivation reads it under.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InboxItem {
-    /// The transaction data, calldata or blob.
-    pub data: Bytes,
-    /// Whether the item was accepted by the batch inbox and is read under the certified rules,
-    /// which admit nothing but a certified commitment.
-    pub certified: bool,
-}
-
-/// The L1 reader underneath [EigenDADataSource]: a [DataAvailabilityProvider] whose items say
-/// which rules they are read under.
-#[async_trait]
-pub trait InboxDataSource {
-    /// Returns the next inbox item of `block_ref`, `PipelineError::Eof` once there is none.
-    async fn next_item(
-        &mut self,
-        block_ref: &BlockInfo,
-        batcher_addr: Address,
-    ) -> PipelineResult<InboxItem>;
-
-    /// Clears the source for the next block ref.
-    fn clear(&mut self);
-}
-
-/// Kona's ethereum source has no certified items: every item it yields is read under the legacy
-/// rules.
-#[async_trait]
-impl<C, B> InboxDataSource for EthereumDataSource<C, B>
-where
-    C: ChainProvider + Send + Sync + Clone + Debug,
-    B: BlobProvider + Send + Sync + Clone + Debug,
-{
-    async fn next_item(
-        &mut self,
-        block_ref: &BlockInfo,
-        batcher_addr: Address,
-    ) -> PipelineResult<InboxItem> {
-        let data = DataAvailabilityProvider::next(self, block_ref, batcher_addr).await?;
-        Ok(InboxItem {
-            data,
-            certified: false,
-        })
-    }
-
-    fn clear(&mut self) {
-        DataAvailabilityProvider::clear(self);
-    }
-}
 
 /// A factory for creating an EigenDADataSource iterator. The internal behavior is that
 /// data is fetched from eigenda or stays as it is if Eth calldata is desired. Those data
@@ -111,7 +61,8 @@ where
     B: BlobProvider + Send + Clone + Debug,
     A: EigenDAPreimageProvider + Send + Clone + Debug,
 {
-    /// Instantiates an [EigenDADataSource] over an inbox reader that tags certified items.
+    /// Instantiates an [EigenDADataSource] over any L1 reader yielding [InboxData], whose
+    /// `certified` flag says which rules selected the item.
     pub const fn with_inbox_source(
         ethereum_source: S,
         eigenda_source: EigenDAPreimageSource<A>,
@@ -167,7 +118,7 @@ where
     C: ChainProvider + Send + Sync + Clone + Debug,
     B: BlobProvider + Send + Sync + Clone + Debug,
     A: EigenDAPreimageProvider + Send + Sync + Clone + Debug,
-    S: InboxDataSource + Send + Sync + Debug,
+    S: DataAvailabilityProvider<Item = InboxData> + Send + Sync + Debug,
 {
     type Item = Bytes;
 
@@ -185,11 +136,7 @@ where
         // the fetched data can either be an altda commitment which can be used to retrieve from eigenda source
         // or a ethereum blob or calldata
         if self.altda_commitment.is_none() {
-            let item = match self
-                .ethereum_source
-                .next_item(block_ref, batcher_addr)
-                .await
-            {
+            let item = match self.ethereum_source.next(block_ref, batcher_addr).await {
                 Ok(d) => d,
                 Err(e) => {
                     // if ethereum source for that block exhausted, reset the ethereum source and itself
@@ -316,7 +263,7 @@ mod tests {
     use eigenda_cert::certified::test_utils::certified_calldata;
     use eigenda_cert::{AltDACommitment, G1Point};
     use kona_derive::test_utils::{TestBlobProvider, TestChainProvider};
-    use kona_derive::{BlobSource, CalldataSource};
+    use kona_derive::{BlobData, BlobSource, CalldataSource, InboxEntry};
     use kona_genesis::{HardForkConfig, RollupConfig};
 
     const L1_INBOX_ADDRESS: Address =
@@ -508,13 +455,19 @@ mod tests {
         // populate blob source with data
         let mut blob = default_test_blob_source();
         blob.open = true;
-        blob.data = vec![Default::default()];
+        blob.data = vec![InboxEntry::Payload {
+            payload: BlobData::default(),
+            certified: false,
+        }];
 
         // populate calldata source with data
         let mut calldata = CalldataSource::new(chain.clone(), Address::ZERO);
         calldata.open = true;
         calldata.calldata = VecDeque::new();
-        calldata.calldata.push_back(Bytes::default());
+        calldata.calldata.push_back(InboxEntry::Payload {
+            payload: Bytes::default(),
+            certified: false,
+        });
 
         let cfg = RollupConfig {
             hardforks: HardForkConfig {
@@ -1138,12 +1091,14 @@ mod tests {
     /// An inbox reader yielding scripted items, the shape kona's certified selection hands over.
     #[derive(Debug, Clone, Default)]
     struct ScriptedInbox {
-        items: VecDeque<InboxItem>,
+        items: VecDeque<InboxData>,
     }
 
     #[async_trait]
-    impl InboxDataSource for ScriptedInbox {
-        async fn next_item(&mut self, _: &BlockInfo, _: Address) -> PipelineResult<InboxItem> {
+    impl DataAvailabilityProvider for ScriptedInbox {
+        type Item = InboxData;
+
+        async fn next(&mut self, _: &BlockInfo, _: Address) -> PipelineResult<InboxData> {
             self.items.pop_front().ok_or(PipelineError::Eof.temp())
         }
 
@@ -1159,7 +1114,7 @@ mod tests {
         ScriptedInbox,
     >;
 
-    fn scripted_source(items: Vec<InboxItem>) -> ScriptedSource {
+    fn scripted_source(items: Vec<InboxData>) -> ScriptedSource {
         EigenDADataSource::with_inbox_source(
             ScriptedInbox {
                 items: items.into(),
@@ -1168,15 +1123,15 @@ mod tests {
         )
     }
 
-    fn certified(data: Bytes) -> InboxItem {
-        InboxItem {
+    fn certified(data: Bytes) -> InboxData {
+        InboxData {
             data,
             certified: true,
         }
     }
 
-    fn legacy(data: Bytes) -> InboxItem {
-        InboxItem {
+    fn legacy(data: Bytes) -> InboxData {
+        InboxData {
             data,
             certified: false,
         }
@@ -1371,6 +1326,45 @@ mod tests {
         assert_eq!(
             source.next(&BLOCK_INFO, BATCHER_ADDRESS).await,
             Ok(Bytes::from_static(&[0x00, 0xaa]))
+        );
+    }
+
+    /// The default source reads kona's ethereum source, whose `certified` flag alone routes an
+    /// item: the same calldata resolves under the certified rules and is skipped under the
+    /// legacy ones.
+    #[tokio::test]
+    async fn kona_certified_flag_selects_the_rules() {
+        let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
+        let mut calldata_source = CalldataSource::new(TestChainProvider::default(), Address::ZERO);
+        calldata_source.open = true;
+        calldata_source.calldata = VecDeque::from([
+            InboxEntry::Payload {
+                payload: calldata.clone(),
+                certified: true,
+            },
+            InboxEntry::Payload {
+                payload: calldata,
+                certified: false,
+            },
+        ]);
+        // Pre-Ecotone, so kona reads the calldata source.
+        let ethereum_source = EthereumDataSource::new(
+            default_test_blob_source(),
+            calldata_source,
+            &RollupConfig::default(),
+        );
+        let mut source = EigenDADataSource::new(ethereum_source, default_test_preimage_source());
+        source
+            .eigenda_source
+            .eigenda_fetcher
+            .insert_certified_payload(&commitment, Ok(certified_payload()));
+
+        let payload = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.unwrap();
+        assert_eq!(payload[..], CERTIFIED_PAYLOAD[..]);
+        assert!(is_skip(&source.next(&BLOCK_INFO, BATCHER_ADDRESS).await));
+        assert_eq!(
+            source.eigenda_source.eigenda_fetcher.certified_requests,
+            vec![(commitment.body().clone(), BLOCK_INFO.number)]
         );
     }
 
