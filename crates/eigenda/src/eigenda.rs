@@ -258,6 +258,12 @@ where
         self.certified_commitment = None;
         self.ethereum_source.seed_activation_phase(phase)
     }
+
+    fn check_hardfork_activation(&self) -> PipelineResult<()> {
+        // The inbox reader follows block certification, so it decides whether a hardfork
+        // activation may reopen the origin under its phase.
+        self.ethereum_source.check_hardfork_activation()
+    }
 }
 
 #[cfg(test)]
@@ -1116,6 +1122,7 @@ mod tests {
         items: VecDeque<InboxData>,
         seeded_phase: Option<ActivationPhase>,
         refuses_seed: bool,
+        refuses_hardfork_activation: bool,
     }
 
     #[async_trait]
@@ -1137,6 +1144,13 @@ mod tests {
             }
             Ok(())
         }
+
+        fn check_hardfork_activation(&self) -> PipelineResult<()> {
+            if self.refuses_hardfork_activation {
+                return Err(PipelineError::Eof.crit());
+            }
+            Ok(())
+        }
     }
 
     type ScriptedSource = EigenDADataSource<
@@ -1152,6 +1166,7 @@ mod tests {
                 items: items.into(),
                 seeded_phase: None,
                 refuses_seed: false,
+                refuses_hardfork_activation: false,
             },
             default_test_preimage_source(),
         )
@@ -1448,5 +1463,18 @@ mod tests {
         source.clear();
         assert!(source.certified_commitment.is_none());
         assert!(source.ethereum_source.items.is_empty());
+    }
+
+    /// The inbox reader's verdict on a hardfork activation reopen reaches the pipeline.
+    #[test]
+    fn hardfork_activation_check_is_the_inbox_readers() {
+        let mut source = scripted_source(vec![]);
+        assert_eq!(source.check_hardfork_activation(), Ok(()));
+
+        source.ethereum_source.refuses_hardfork_activation = true;
+        assert_eq!(
+            source.check_hardfork_activation(),
+            Err(PipelineError::Eof.crit())
+        );
     }
 }
