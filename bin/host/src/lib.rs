@@ -1,3 +1,5 @@
+pub mod certified;
+
 pub mod eigenda_preimage;
 
 pub mod cfg;

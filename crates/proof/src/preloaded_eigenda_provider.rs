@@ -4,7 +4,7 @@ use alloy_primitives::FixedBytes;
 use ark_bn254::{Fq, G1Affine};
 use ark_ff::PrimeField;
 use async_trait::async_trait;
-use eigenda_cert::{AltDACommitment, G1Point};
+use eigenda_cert::{AltDACommitment, CertifiedCommitment, G1Point};
 use hokulea_eigenda::{EigenDAPreimageProvider, EncodedPayload};
 use rust_kzg_bn254_primitives::blob::Blob;
 use rust_kzg_bn254_verifier::batch;
@@ -36,6 +36,8 @@ pub struct PreloadedEigenDAPreimageProvider {
     validity_entries: Vec<(AltDACommitment, bool)>,
     /// The tuple contains a mapping from DAcert to Eigenda encoded payload
     encoded_payload_entries: Vec<(AltDACommitment, EncodedPayload)>,
+    /// The tuple contains a mapping from certified commitment to its KZG-verified encoded payload
+    certified_payload_entries: Vec<(CertifiedCommitment, EncodedPayload)>,
 }
 
 impl PreloadedEigenDAPreimageProvider {
@@ -125,6 +127,17 @@ impl PreloadedEigenDAPreimageProvider {
             commitments.push(altda_commitment.get_kzg_commitment());
         }
 
+        // certified encoded payloads are bound to their certificate's blob point in the same batch
+        let mut certified_payload_entries = vec![];
+        for (commitment, encoded_payload, kzg_proof) in eigenda_witness.certified_payloads {
+            let blob =
+                Blob::new(encoded_payload.serialize()).expect("should be able to construct a blob");
+            blobs.push(blob);
+            proofs.push(kzg_proof);
+            commitments.push(commitment.blob().commitment);
+            certified_payload_entries.push((commitment, encoded_payload));
+        }
+
         assert!(batch_verify(&blobs, &commitments, &proofs));
         // invariant check
         assert!(validity_entries.len() >= encoded_payload_entries.len());
@@ -133,10 +146,12 @@ impl PreloadedEigenDAPreimageProvider {
         // reverse there, so that what is being popped is the early data
         validity_entries.reverse();
         encoded_payload_entries.reverse();
+        certified_payload_entries.reverse();
 
         PreloadedEigenDAPreimageProvider {
             validity_entries,
             encoded_payload_entries,
+            certified_payload_entries,
         }
     }
 }
@@ -185,6 +200,26 @@ impl EigenDAPreimageProvider for PreloadedEigenDAPreimageProvider {
                 requested altda commitment is {:?}, stored is {:?}", altda_commitment.to_digest(), stored_altda_commitment.to_digest());
         }
     }
+
+    async fn get_certified_encoded_payload(
+        &mut self,
+        commitment: &CertifiedCommitment,
+        _l1_inclusion_block_number: u64,
+    ) -> Result<EncodedPayload, Self::Error> {
+        let (stored_commitment, encoded_payload) =
+            self.certified_payload_entries.pop().unwrap_or_else(|| {
+                panic!(
+                    "no certified encoded payload available for {:?} in preloaded preimage provider",
+                    commitment.body()
+                )
+            });
+        if stored_commitment != *commitment {
+            // It is safe to abort here, because zkVM is not given the correct preimage to start with, stop early
+            panic!("preloaded preimage provider does not match the certified commitment requested from derivation pipeline
+                requested {:?}, stored {:?}", commitment.body(), stored_commitment.body());
+        }
+        Ok(encoded_payload)
+    }
 }
 
 /// Eventually, rust-kzg-bn254 would provide an interface that takes big endian
@@ -226,6 +261,7 @@ mod tests {
     use alloy_primitives::{hex, Bytes, U256};
     use canoe_verifier::CanoeNoOpVerifier;
     use canoe_verifier_address_fetcher::CanoeNoOpVerifierAddressFetcher;
+    use eigenda_cert::certified::test_utils::certified_calldata;
     use eigenda_cert::AltDACommitment;
     use num::BigUint;
     use rust_kzg_bn254_primitives::errors::KzgError;
@@ -345,6 +381,7 @@ mod tests {
                 },
                 proof,
             )],
+            certified_payloads: vec![],
             canoe_proof_bytes: Some(Vec::new()),
         }
     }
@@ -495,6 +532,67 @@ mod tests {
             CanoeNoOpVerifier {},
             CanoeNoOpVerifierAddressFetcher {},
         );
+    }
+
+    /// A witness holding one certified encoded payload of `payload`, proven against a
+    /// certificate whose blob point is the payload's own commitment.
+    fn certified_witness(payload: &[u8]) -> (EigenDAWitness, CertifiedCommitment) {
+        let encoded_payload = EncodedPayload::encode(payload).unwrap();
+        let (_, point, proof) =
+            compute_kzg_proof_and_commitment(encoded_payload.serialize().to_vec());
+        let calldata = certified_calldata(point, encoded_payload.num_field_element() as u32);
+        let commitment = CertifiedCommitment::from_calldata(&calldata).unwrap();
+        let witness = EigenDAWitness {
+            certified_payloads: vec![(commitment.clone(), encoded_payload, proof)],
+            ..Default::default()
+        };
+        (witness, commitment)
+    }
+
+    #[tokio::test]
+    async fn test_from_witness_certified_payload() {
+        let (witness, commitment) = certified_witness(b"certified frames");
+        let mut preimage = PreloadedEigenDAPreimageProvider::from_witness(
+            construct_template_witness_with_trusted_data(witness.clone()),
+            CanoeNoOpVerifier {},
+            CanoeNoOpVerifierAddressFetcher {},
+        );
+        assert_eq!(
+            preimage
+                .get_certified_encoded_payload(&commitment, 7)
+                .await
+                .unwrap(),
+            witness.certified_payloads[0].1
+        );
+        assert!(preimage.certified_payload_entries.is_empty());
+    }
+
+    // a certified encoded payload whose proof is for other bytes is not bound to the certificate
+    #[tokio::test]
+    #[should_panic]
+    async fn test_from_witness_certified_payload_unbound() {
+        let (mut witness, _) = certified_witness(b"certified frames");
+        let (other, _) = certified_witness(b"other frames!!!!");
+        witness.certified_payloads[0].2 = other.certified_payloads[0].2;
+        let _ = PreloadedEigenDAPreimageProvider::from_witness(
+            construct_template_witness_with_trusted_data(witness),
+            CanoeNoOpVerifier {},
+            CanoeNoOpVerifierAddressFetcher {},
+        );
+    }
+
+    // the requested certified commitment must be the stored one
+    #[tokio::test]
+    #[should_panic]
+    async fn test_from_witness_certified_payload_unknown_commitment() {
+        let (witness, _) = certified_witness(b"certified frames");
+        let (_, other) = certified_witness(b"other frames!!!!");
+        let mut preimage = PreloadedEigenDAPreimageProvider::from_witness(
+            construct_template_witness_with_trusted_data(witness),
+            CanoeNoOpVerifier {},
+            CanoeNoOpVerifierAddressFetcher {},
+        );
+        let _ = preimage.get_certified_encoded_payload(&other, 7).await;
     }
 
     // invalid encoded payload that is not a field element, failed when creating a blob

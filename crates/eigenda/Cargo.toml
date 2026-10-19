@@ -21,7 +21,7 @@ kona-genesis = { workspace = true }
 alloy-consensus = { workspace = true}
 alloy-primitives = { workspace = true}
 alloy-rlp = { workspace = true }
-rust-kzg-bn254-primitives.workspace = true
+eigenda-cert = { workspace = true, features = ["test-utils"] }
 
 [features]
 serde = ["kona-protocol/serde"]
