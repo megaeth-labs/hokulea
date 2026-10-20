@@ -572,8 +572,9 @@ mod tests {
     }
 
     /// op-node's go-ethereum `Unpack` refuses a `uint32` word above `2^32 - 1`, so a certificate
-    /// whose blob length carries dirty high bits is skipped there even when the attestation is the
-    /// digest of the clean re-encoding. Reading the low four bytes here would accept it and fork.
+    /// whose blob length carries dirty high bits halts derivation there even when the attestation
+    /// is the digest of the clean re-encoding. Reading the low four bytes here would accept it and
+    /// fork.
     #[test]
     fn dirty_narrow_int_in_certificate_is_refused() {
         let length = 0x7a3c_51e9;

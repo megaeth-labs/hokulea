@@ -5,7 +5,7 @@ use crate::{eigenda_preimage::EigenDAPreimageSource, HokuleaErrorKind, ALTDA_DER
 use eigenda_cert::{AltDACommitment, CertifiedCommitment};
 use kona_derive::PipelineErrorKind;
 
-use alloc::{boxed::Box, fmt::Debug};
+use alloc::{boxed::Box, fmt::Debug, format};
 use alloy_primitives::Address;
 use async_trait::async_trait;
 use core::marker::PhantomData;
@@ -156,14 +156,20 @@ where
 
             if item.certified {
                 // A certified item has no pass-through: the only data it may carry is the
-                // commitment the inbox verified. One this decoder cannot read, or whose certificate
-                // is not the attested one, is not a batch, and no retry can change a verdict on
-                // calldata (op-node altda_data_source.go, certified branch).
+                // commitment the inbox verified. The inbox accepted this calldata, so one this
+                // decoder cannot read, or whose certificate is not the attested one, is a
+                // divergence between the inbox's decoder and this one. Skipping it would derive
+                // past a frame the chain never received, and no retry changes a verdict on
+                // calldata, so derivation halts here, as op-node's does (altda_data_source.go,
+                // certified branch).
                 let commitment = match CertifiedCommitment::from_calldata(&item.data) {
                     Ok(commitment) => commitment,
                     Err(e) => {
-                        warn!("Hokulea skips an undecodable certified commitment: {}", e);
-                        return Err(PipelineErrorKind::Temporary(PipelineError::NotEnoughData));
+                        error!("Hokulea halts at accepted certified calldata: {}", e);
+                        return Err(PipelineError::Provider(format!(
+                            "accepted certified calldata does not resolve to a certified commitment: {e}"
+                        ))
+                        .crit());
                     }
                 };
                 return self.resolve_certified(commitment, block_ref.number).await;
@@ -1234,37 +1240,48 @@ mod tests {
     }
 
     /// A certified item has no pass-through, and one that is not an attested certified
-    /// commitment is skipped without retrieval, then the next item is read.
+    /// commitment aborts derivation without retrieval, as op-node halts on it: the inbox
+    /// accepted it, so only a decoder divergence reaches here, and skipping it would derive the
+    /// items after it, which op-node never derives.
     #[tokio::test]
-    async fn undecodable_certified_items_are_skipped() {
+    async fn undecodable_certified_items_abort() {
         let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
         let legacy_eigenda: Bytes = alloy_primitives::hex::decode(ALTDA_COMMITMENT_BYTES_1)
             .unwrap()
             .into();
         let mut trailing_byte = calldata.to_vec();
         trailing_byte.push(0);
-        let mut source = scripted_source(vec![
-            certified(Bytes::from_static(&[0x00, 0x01, 0x02])),
-            certified(legacy_eigenda),
-            certified(trailing_byte.into()),
-            certified(Bytes::new()),
-            certified(calldata),
-        ]);
-        source
-            .eigenda_source
-            .eigenda_fetcher
-            .insert_certified_payload(&commitment, Ok(certified_payload()));
+        let undecodable: Vec<(&str, Bytes)> = vec![
+            ("not a commitment", Bytes::from_static(&[0x00, 0x01, 0x02])),
+            ("a legacy EigenDA commitment", legacy_eigenda),
+            ("a trailing byte", trailing_byte.into()),
+            ("empty calldata", Bytes::new()),
+        ];
 
-        for _ in 0..4 {
-            assert!(is_skip(&source.next(&BLOCK_INFO, BATCHER_ADDRESS).await));
+        for (case, data) in undecodable {
+            let mut source = scripted_source(vec![certified(data), certified(calldata.clone())]);
+            source
+                .eigenda_source
+                .eigenda_fetcher
+                .insert_certified_payload(&commitment, Ok(certified_payload()));
+
+            let result = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await;
+            assert!(
+                matches!(
+                    result,
+                    Err(PipelineErrorKind::Critical(PipelineError::Provider(_)))
+                ),
+                "{case}: {result:?}"
+            );
+            assert!(
+                source
+                    .eigenda_source
+                    .eigenda_fetcher
+                    .certified_requests
+                    .is_empty(),
+                "{case}"
+            );
         }
-        assert!(source
-            .eigenda_source
-            .eigenda_fetcher
-            .certified_requests
-            .is_empty());
-        let payload = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.unwrap();
-        assert_eq!(payload, certified(Bytes::from_static(CERTIFIED_PAYLOAD)));
     }
 
     /// A temporary provider error keeps the decoded commitment: the retry resolves the same one
