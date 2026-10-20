@@ -13,6 +13,7 @@ use kona_derive::{
     ActivationPhase, BlobProvider, ChainProvider, DataAvailabilityProvider, EthereumDataSource,
     InboxData, PipelineError, PipelineResult,
 };
+use kona_genesis::RollupConfig;
 use kona_protocol::BlockInfo;
 use tracing::{error, warn};
 
@@ -259,10 +260,10 @@ where
         self.ethereum_source.seed_activation_phase(phase)
     }
 
-    fn check_hardfork_activation(&self) -> PipelineResult<()> {
+    fn check_hardfork_activation(&self, cfg: &RollupConfig) -> PipelineResult<()> {
         // The inbox reader follows block certification, so it decides whether a hardfork
         // activation may reopen the origin under its phase.
-        self.ethereum_source.check_hardfork_activation()
+        self.ethereum_source.check_hardfork_activation(cfg)
     }
 }
 
@@ -283,7 +284,7 @@ mod tests {
     use eigenda_cert::{AltDACommitment, G1Point};
     use kona_derive::test_utils::{TestBlobProvider, TestChainProvider};
     use kona_derive::{BlobData, BlobSource, CalldataSource, InboxEntry};
-    use kona_genesis::{HardForkConfig, RollupConfig};
+    use kona_genesis::{BlockCertificationConfig, HardForkConfig};
 
     const L1_INBOX_ADDRESS: Address =
         alloy_primitives::address!("0x000faef0a3d9711c3e9bbc4f3e2730dd75167da3");
@@ -1145,7 +1146,7 @@ mod tests {
             Ok(())
         }
 
-        fn check_hardfork_activation(&self) -> PipelineResult<()> {
+        fn check_hardfork_activation(&self, _: &RollupConfig) -> PipelineResult<()> {
             if self.refuses_hardfork_activation {
                 return Err(PipelineError::Eof.crit());
             }
@@ -1468,12 +1469,21 @@ mod tests {
     /// The inbox reader's verdict on a hardfork activation reopen reaches the pipeline.
     #[test]
     fn hardfork_activation_check_is_the_inbox_readers() {
+        // A certified config, under which kona's provided check would refuse: the verdict is the
+        // inbox reader's only if the source forwards the check.
+        let cfg = RollupConfig {
+            block_certification: Some(BlockCertificationConfig {
+                activation_scan_start_l1_block: 0,
+                activation: None,
+            }),
+            ..Default::default()
+        };
         let mut source = scripted_source(vec![]);
-        assert_eq!(source.check_hardfork_activation(), Ok(()));
+        assert_eq!(source.check_hardfork_activation(&cfg), Ok(()));
 
         source.ethereum_source.refuses_hardfork_activation = true;
         assert_eq!(
-            source.check_hardfork_activation(),
+            source.check_hardfork_activation(&cfg),
             Err(PipelineError::Eof.crit())
         );
     }
