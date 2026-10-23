@@ -9,10 +9,15 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 pub mod altda_commitment;
+pub mod certified;
 pub mod v2_cert;
 pub mod v3_cert;
 pub mod v4_cert;
 pub use altda_commitment::{AltDACommitment, AltDACommitmentParseError, EigenDAVersionedCert};
+pub use certified::{
+    AttestedBlob, CertifiedCommitment, CertifiedCommitmentError, ALTDA_DERIVATION_VERSION,
+    CERTIFIED_COMMITMENT_TYPE,
+};
 pub use v2_cert::EigenDACertV2;
 pub use v3_cert::EigenDACertV3;
 pub use v4_cert::EigenDACertV4;

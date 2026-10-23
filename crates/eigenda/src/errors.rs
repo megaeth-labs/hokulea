@@ -137,3 +137,30 @@ impl From<HokuleaPreimageError> for HokuleaErrorKind {
         }
     }
 }
+
+/// A certified payload that does not match its attested certificate. Certified derivation never
+/// skips a decoded commitment, and a provider handed these bytes only after binding them to the
+/// certificate, so every variant aborts derivation instead of being retried or dropped.
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum CertifiedPayloadError {
+    /// The encoded payload is not as wide as the certificate's blob.
+    #[error("encoded payload has {actual} field elements, but the certificate names {expected}")]
+    LengthMismatch {
+        /// Field element count the certificate carries
+        expected: u64,
+        /// Field element count of the encoded payload
+        actual: u64,
+    },
+    /// The encoded payload does not decode.
+    #[error("certified encoded payload does not decode: {0}")]
+    Decoding(#[source] HokuleaStatelessError),
+    /// The encoded payload decodes, but is not the encoding of what it decodes to.
+    #[error("certified encoded payload is not the canonical encoding of its payload")]
+    NonCanonical,
+}
+
+impl From<CertifiedPayloadError> for HokuleaErrorKind {
+    fn from(e: CertifiedPayloadError) -> Self {
+        HokuleaErrorKind::Critical(e.to_string())
+    }
+}

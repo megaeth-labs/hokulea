@@ -1,0 +1,86 @@
+{
+  "schema": "mega-block-certifier/eigenda_kzg_commitment",
+  "version": 1,
+  "generated_by": "crates/eigenda-kzg/tools/block-certifier-gen/main.go",
+  "provenance": {
+    "captured_utc": "2026-09-08T12:17:55Z",
+    "kind": "computed by an independent implementation",
+    "kind_note": "every commitment below was computed by EigenDA's own Go committer, not by this repository. Nothing in mega-block-certifier participated in producing these numbers, which is the entire point: a KZG commitment checked only against our own arithmetic proves that we agree with ourselves and nothing else. The generator is checked in beside this file so the numbers can be reproduced rather than trusted.",
+    "tool": {
+      "path": "crates/eigenda-kzg/tools/block-certifier-gen/main.go",
+      "how_to_run": "copy into a checkout of github.com/Layr-Labs/eigenda at the commit below, as block-certifier-gen/main.go, then `go run ./block-certifier-gen` from the repository root (it reads resources/srs/ by relative path)",
+      "entry_point": "encoding/v2/kzg/committer.Committer.GetCommitmentsForPaddedLength, reached through encoding/codec.PadPayload. Both are EigenDA's own exported API; the generator adds no arithmetic of its own.",
+      "eigenda_repo": "https://github.com/Layr-Labs/eigenda",
+      "eigenda_commit": "bfa451e1aaa5eb53ec250758054bbc3267e66208",
+      "gnark_crypto": "github.com/consensys/gnark-crypto v0.18.0",
+      "go": "go1.25.0 linux/amd64"
+    },
+    "srs": {
+      "file": "resources/srs/g1.point (in the EigenDA checkout above)",
+      "file_bytes": 16777216,
+      "file_sha256": "8f18b9c04ed4bddcdb73001fb693703197328cecabdfa9025f647410b0c50d7f",
+      "file_sha256_source": "resources/srs/srs-files-16777216.sha256, EigenDA's own checksum file, verified byte-for-byte against the downloaded artifact",
+      "prefix_committed_here": "crates/eigenda-kzg/testdata/g1.point.first64",
+      "prefix_points": 64,
+      "prefix_bytes": 2048,
+      "prefix_sha256": "064e0b52f5f63fea6bdf41587b54e697936911264c03219efa7f01e32876a10e",
+      "prefix_note": "the first 64 of the file's 524288 compressed G1 points, byte-for-byte. A KZG commitment to a polynomial of degree < n touches only the first n SRS points, so a prefix is the whole of the setup these cases need and 2 KiB is auditable where 16 MiB is not. Taking a prefix is not a simplification of the scheme; it is the same setup, truncated where the cases stop using it."
+    }
+  },
+  "meaning": {
+    "payload": "the arbitrary bytes a caller wants named. This is what DaCommitmentScheme::commit receives.",
+    "padded": "payload after codec.PadPayload: a 0x00 byte prepended to each 31-byte chunk, zero-filled to a 32-byte multiple. The leading zero is what keeps each 32-byte group below the BN254 scalar modulus when read big-endian.",
+    "symbols": "padded_len / 32, the number of BN254 field elements. These are the polynomial's COEFFICIENTS, not its evaluations -- see the form note below.",
+    "form": "EigenDA commits to the polynomial whose COEFFICIENTS are the field elements: encoding/v2/kzg/committer.computeCommitmentV2 is a multi-exponentiation of the monomial SRS against the symbols, with no inverse FFT anywhere on the path. Committing to the polynomial whose EVALUATIONS are those same field elements yields a different, entirely plausible-looking point that no EigenDA node would agree with. rust-kzg-bn254-prover's Kzg::commit_blob takes the evaluation path, so it is the wrong function here and Kzg::commit_coeff_form is the right one. This field exists because that choice is invisible in the output and fatal in the answer.",
+    "padding_to_power_of_two": "reported_length_next_pow2 is what EigenDA records as the blob's length. It does not affect the commitment: zero coefficients contribute nothing to a multi-exponentiation, so a coefficient-form commitment is invariant under trailing zero padding. Recorded so that a reader does not have to rediscover that it is inert.",
+    "commitment_x": "the G1 point's X coordinate, 32 bytes big-endian, as EigenDA's BN254.G1Point carries it on chain.",
+    "commitment_y": "the same point's Y coordinate, 32 bytes big-endian.",
+    "commitment_uncompressed_64": "commitment_x ++ commitment_y. This is the width DaCommitmentScheme::Commitment has for this scheme."
+  },
+  "cases": [
+    {
+      "name": "base",
+      "why": "the ordinary case: a short ASCII payload that does not fill one field element cleanly, so it exercises the 31-byte chunking and the tail zero fill at once.",
+      "payload_utf8": "block-certifier pinned eigenda kzg commitment vector",
+      "payload_hex": "666664612070696e6e656420656967656e6461206b7a6720636f6d6d69746d656e7420766563746f72",
+      "payload_len": 41,
+      "padded_hex": "00666664612070696e6e656420656967656e6461206b7a6720636f6d6d69746d00656e7420766563746f72000000000000000000000000000000000000000000",
+      "padded_len": 64,
+      "symbols": 2,
+      "reported_length_next_pow2": 2,
+      "commitment_x": "0ab85621921868d77383af0f1666287bc6fa2cb0e106b38b78e8b51585701115",
+      "commitment_y": "0973caa00a62413d4bfc157a4c8b721ad02a83a682d95925126aa0b44da19ab5",
+      "commitment_uncompressed_64": "0ab85621921868d77383af0f1666287bc6fa2cb0e106b38b78e8b515857011150973caa00a62413d4bfc157a4c8b721ad02a83a682d95925126aa0b44da19ab5",
+      "commitment_compressed_32": "8ab85621921868d77383af0f1666287bc6fa2cb0e106b38b78e8b51585701115"
+    },
+    {
+      "name": "base_byte20_xor_01",
+      "why": "the positive control, and the reason it is a case rather than an assertion: it is `base` with byte 20 exclusive-ored by 0x01 -- one bit of one byte, inside the first field element. Its commitment was computed by the same external tool in the same run, so the test proves the change reaches the curve point AND that our arithmetic tracks EigenDA's on the changed input too. Asserting only `differs from base` would pass for an implementation that got both points wrong.",
+      "payload_utf8": "block-certifier pinned eigenda jzg commitment vector",
+      "payload_hex": "666664612070696e6e656420656967656e6461206a7a6720636f6d6d69746d656e7420766563746f72",
+      "payload_len": 41,
+      "padded_hex": "00666664612070696e6e656420656967656e6461206a7a6720636f6d6d69746d00656e7420766563746f72000000000000000000000000000000000000000000",
+      "padded_len": 64,
+      "symbols": 2,
+      "reported_length_next_pow2": 2,
+      "commitment_x": "1886d394e5e0b69eb41ef056bbb301e35bf848460ffef15c683917191c1869d9",
+      "commitment_y": "16d0280bc30a2d7671cbe16ca99a510c53a30fcd0e5196db59ebb5a96302550b",
+      "commitment_uncompressed_64": "1886d394e5e0b69eb41ef056bbb301e35bf848460ffef15c683917191c1869d916d0280bc30a2d7671cbe16ca99a510c53a30fcd0e5196db59ebb5a96302550b",
+      "commitment_compressed_32": "9886d394e5e0b69eb41ef056bbb301e35bf848460ffef15c683917191c1869d9"
+    },
+    {
+      "name": "pattern_200",
+      "why": "200 bytes of the deterministic pattern (i*7 + 13) mod 256, which lands on 7 symbols -- neither one nor a power of two. It is the case that would catch an implementation that padded the coefficient list to 8 and then committed in evaluation form, or that mis-sized the SRS slice.",
+      "payload_hex": "0d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e",
+      "payload_len": 200,
+      "padded_hex": "000d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8df00e6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b800bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a9100989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a0071787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c43004a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c00232a31383f464d545b626970777e0000000000000000000000000000000000",
+      "padded_len": 224,
+      "symbols": 7,
+      "reported_length_next_pow2": 8,
+      "commitment_x": "02509c6fe7ccec189d869f393788949b27a0bd4f6f62d457b9afc41cc9659ee1",
+      "commitment_y": "0e98c85206e182564a050f0b2bea1b9c71e4fc6ab6b6f39bedc1bbf413e5ec27",
+      "commitment_uncompressed_64": "02509c6fe7ccec189d869f393788949b27a0bd4f6f62d457b9afc41cc9659ee10e98c85206e182564a050f0b2bea1b9c71e4fc6ab6b6f39bedc1bbf413e5ec27",
+      "commitment_compressed_32": "82509c6fe7ccec189d869f393788949b27a0bd4f6f62d457b9afc41cc9659ee1"
+    }
+  ]
+}

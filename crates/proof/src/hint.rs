@@ -1,4 +1,4 @@
-//! This module contains the [ExtendedHintType], which adds an EigenDACommitment case to kona's [HintType] enum.
+//! This module contains the [ExtendedHintType], which adds the EigenDA hints to kona's [HintType] enum.
 
 use alloc::{string::String, vec::Vec};
 use alloy_primitives::hex;
@@ -12,6 +12,9 @@ use alloc::str::FromStr;
 pub enum ExtendedHintType {
     Original(HintType),
     EigenDACert,
+    /// A certified commitment's payload, hinted as `CertifiedCommitment::payload_hint`:
+    /// `0x80 || body || l1_inclusion_block_number`.
+    CertifiedPayload,
 }
 
 impl ExtendedHintType {
@@ -28,6 +31,7 @@ impl FromStr for ExtendedHintType {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "eigenda-certificate" => Ok(Self::EigenDACert),
+            "mega-certified-payload" => Ok(Self::CertifiedPayload),
 
             _ => Ok(Self::Original(HintType::from_str(value)?)),
         }
@@ -38,6 +42,7 @@ impl From<ExtendedHintType> for &str {
     fn from(value: ExtendedHintType) -> Self {
         match value {
             ExtendedHintType::EigenDACert => "eigenda-certificate",
+            ExtendedHintType::CertifiedPayload => "mega-certified-payload",
             ExtendedHintType::Original(hint_type) => hint_type.into(),
         }
     }

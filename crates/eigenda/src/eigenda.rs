@@ -2,16 +2,18 @@
 //! implementation of the [DataAvailabilityProvider] trait for the EigenDA protocol.
 use crate::traits::EigenDAPreimageProvider;
 use crate::{eigenda_preimage::EigenDAPreimageSource, HokuleaErrorKind, ALTDA_DERIVATION_VERSION};
-use eigenda_cert::AltDACommitment;
+use eigenda_cert::{AltDACommitment, CertifiedCommitment};
 use kona_derive::PipelineErrorKind;
 
-use alloc::{boxed::Box, fmt::Debug};
-use alloy_primitives::{Address, Bytes};
+use alloc::{boxed::Box, fmt::Debug, format};
+use alloy_primitives::Address;
 use async_trait::async_trait;
+use core::marker::PhantomData;
 use kona_derive::{
-    BlobProvider, ChainProvider, DataAvailabilityProvider, EthereumDataSource, PipelineError,
-    PipelineResult,
+    ActivationPhase, BlobProvider, ChainProvider, DataAvailabilityProvider, EthereumDataSource,
+    InboxData, PipelineError, PipelineResult,
 };
+use kona_genesis::RollupConfig;
 use kona_protocol::BlockInfo;
 use tracing::{error, warn};
 
@@ -20,19 +22,23 @@ use tracing::{error, warn};
 /// are cached. When next() is called it just returns the next cached encoded payload.
 /// Otherwise, EOF is sent if iterator is empty
 #[derive(Debug, Clone)]
-pub struct EigenDADataSource<C, B, A>
+pub struct EigenDADataSource<C, B, A, S = EthereumDataSource<C, B>>
 where
     C: ChainProvider + Send + Clone,
     B: BlobProvider + Send + Clone,
     A: EigenDAPreimageProvider + Send + Clone,
 {
     /// The ethereum source.
-    pub ethereum_source: EthereumDataSource<C, B>,
+    pub ethereum_source: S,
     /// The eigenda preimage source.
     pub eigenda_source: EigenDAPreimageSource<A>,
     /// altda commitment, if we step in by calling next and it is Some, it means previous
     /// call has a temporary error
     pub altda_commitment: Option<AltDACommitment>,
+    /// certified commitment whose payload a previous call failed to fetch with a temporary error.
+    /// The inbox item is already consumed, so the retry has to resolve this one.
+    pub certified_commitment: Option<CertifiedCommitment>,
+    _l1_providers: PhantomData<(C, B)>,
 }
 
 impl<C, B, A> EigenDADataSource<C, B, A>
@@ -46,22 +52,81 @@ where
         ethereum_source: EthereumDataSource<C, B>,
         eigenda_source: EigenDAPreimageSource<A>,
     ) -> Self {
+        Self::with_inbox_source(ethereum_source, eigenda_source)
+    }
+}
+
+impl<C, B, A, S> EigenDADataSource<C, B, A, S>
+where
+    C: ChainProvider + Send + Clone + Debug,
+    B: BlobProvider + Send + Clone + Debug,
+    A: EigenDAPreimageProvider + Send + Clone + Debug,
+{
+    /// Instantiates an [EigenDADataSource] over any L1 reader yielding [InboxData], whose
+    /// `certified` flag says which rules selected the item.
+    pub const fn with_inbox_source(
+        ethereum_source: S,
+        eigenda_source: EigenDAPreimageSource<A>,
+    ) -> Self {
         Self {
             ethereum_source,
             eigenda_source,
             altda_commitment: None,
+            certified_commitment: None,
+            _l1_providers: PhantomData,
+        }
+    }
+
+    /// Resolves a decoded certified commitment. It is never skipped: the inbox's cursor has moved
+    /// past its frames, so no later item can carry them. A temporary provider error keeps the
+    /// commitment for the retry; any other failure aborts derivation.
+    async fn resolve_certified(
+        &mut self,
+        commitment: CertifiedCommitment,
+        l1_inclusion_bn: u64,
+    ) -> PipelineResult<InboxData> {
+        match self
+            .eigenda_source
+            .next_certified(&commitment, l1_inclusion_bn)
+            .await
+        {
+            Ok(payload) => {
+                self.certified_commitment = None;
+                // The frame queue tags the payload's frames with this flag, so the channel and
+                // batch stages apply the certified rules to them.
+                Ok(InboxData {
+                    data: payload,
+                    certified: true,
+                })
+            }
+            Err(HokuleaErrorKind::Temporary(e)) => {
+                warn!(
+                    "Hokulea certified derivation retries after a temporary error: {}",
+                    e
+                );
+                self.certified_commitment = Some(commitment);
+                Err(PipelineError::Provider(e).temp())
+            }
+            Err(HokuleaErrorKind::Discard(e)) | Err(HokuleaErrorKind::Critical(e)) => {
+                error!(
+                    "Hokulea certified derivation cannot resolve a certified commitment: {}",
+                    e
+                );
+                Err(PipelineError::Provider(e).crit())
+            }
         }
     }
 }
 
 #[async_trait]
-impl<C, B, A> DataAvailabilityProvider for EigenDADataSource<C, B, A>
+impl<C, B, A, S> DataAvailabilityProvider for EigenDADataSource<C, B, A, S>
 where
     C: ChainProvider + Send + Sync + Clone + Debug,
     B: BlobProvider + Send + Sync + Clone + Debug,
     A: EigenDAPreimageProvider + Send + Sync + Clone + Debug,
+    S: DataAvailabilityProvider<Item = InboxData> + Send + Sync + Debug,
 {
-    type Item = Bytes;
+    type Item = InboxData;
 
     async fn next(
         &mut self,
@@ -69,11 +134,15 @@ where
         batcher_addr: Address,
     ) -> PipelineResult<Self::Item> {
         debug!("Data Available Source next {} {}", block_ref, batcher_addr);
+        if let Some(commitment) = self.certified_commitment.take() {
+            return self.resolve_certified(commitment, block_ref.number).await;
+        }
+
         // if there is no data, fetch one from ethereum source.
         // the fetched data can either be an altda commitment which can be used to retrieve from eigenda source
         // or a ethereum blob or calldata
         if self.altda_commitment.is_none() {
-            let local_data = match self.ethereum_source.next(block_ref, batcher_addr).await {
+            let item = match self.ethereum_source.next(block_ref, batcher_addr).await {
                 Ok(d) => d,
                 Err(e) => {
                     // if ethereum source for that block exhausted, reset the ethereum source and itself
@@ -85,6 +154,28 @@ where
                 }
             };
 
+            if item.certified {
+                // A certified item has no pass-through: the only data it may carry is the
+                // commitment the inbox verified. The inbox accepted this calldata, so one this
+                // decoder cannot read, or whose certificate is not the attested one, is a
+                // divergence between the inbox's decoder and this one. Skipping it would derive
+                // past a frame the chain never received, and no retry changes a verdict on
+                // calldata, so derivation halts here, as op-node's does (altda_data_source.go,
+                // certified branch).
+                let commitment = match CertifiedCommitment::from_calldata(&item.data) {
+                    Ok(commitment) => commitment,
+                    Err(e) => {
+                        error!("Hokulea halts at accepted certified calldata: {}", e);
+                        return Err(PipelineError::Provider(format!(
+                            "accepted certified calldata does not resolve to a certified commitment: {e}"
+                        ))
+                        .crit());
+                    }
+                };
+                return self.resolve_certified(commitment, block_ref.number).await;
+            }
+            let local_data = item.data;
+
             // if data length is 0, return early. It implies the data is skipped
             if local_data.is_empty() {
                 // see handling in go implementation
@@ -95,7 +186,7 @@ where
 
             // it is not intended for altDA
             if local_data[0] != ALTDA_DERIVATION_VERSION {
-                return Ok(local_data);
+                return Ok(local_data.into());
             }
 
             match self.eigenda_source.parse(&local_data) {
@@ -147,7 +238,7 @@ where
                     Ok(c) => {
                         // EigenLabs branch https://github.com/Layr-Labs/optimism/blob/34e5ce8416de529b8a57b0c55e1635ebe89805dc/op-node/rollup/derive/altda_data_source.go#L117
                         self.altda_commitment = None;
-                        return Ok(c);
+                        return Ok(c.into());
                     }
                     Err(e) => {
                         // encoded payload cannot be decoded, data is discarded and try next one
@@ -163,7 +254,22 @@ where
 
     fn clear(&mut self) {
         self.altda_commitment = None;
+        self.certified_commitment = None;
         self.ethereum_source.clear();
+    }
+
+    fn seed_activation_phase(&mut self, phase: ActivationPhase) -> PipelineResult<()> {
+        // A pending certified commitment was read before the reset's base, which the inbox no
+        // longer serves under the recovered phase. Only certified items set it, so the legacy
+        // path keeps its behaviour.
+        self.certified_commitment = None;
+        self.ethereum_source.seed_activation_phase(phase)
+    }
+
+    fn check_hardfork_activation(&self, cfg: &RollupConfig) -> PipelineResult<()> {
+        // The inbox reader follows block certification, so it decides whether a hardfork
+        // activation may reopen the origin under its phase.
+        self.ethereum_source.check_hardfork_activation(cfg)
     }
 }
 
@@ -178,12 +284,13 @@ mod tests {
     use alloc::vec::Vec;
     use alloc::{collections::VecDeque, vec};
     use alloy_consensus::TxEnvelope;
-    use alloy_primitives::B256;
+    use alloy_primitives::{Bytes, B256, U256};
     use alloy_rlp::Decodable;
-    use eigenda_cert::AltDACommitment;
+    use eigenda_cert::certified::test_utils::certified_calldata;
+    use eigenda_cert::{AltDACommitment, G1Point};
     use kona_derive::test_utils::{TestBlobProvider, TestChainProvider};
-    use kona_derive::{BlobSource, CalldataSource};
-    use kona_genesis::{HardForkConfig, RollupConfig};
+    use kona_derive::{BlobData, BlobSource, CalldataSource, InboxEntry};
+    use kona_genesis::{BlockCertificationConfig, HardForkConfig};
 
     const L1_INBOX_ADDRESS: Address =
         alloy_primitives::address!("0x000faef0a3d9711c3e9bbc4f3e2730dd75167da3");
@@ -331,7 +438,7 @@ mod tests {
         block_info: &BlockInfo,
     ) -> (Vec<TxEnvelope>, Vec<AltDACommitment>, Vec<EncodedPayload>) {
         // inbox addr
-        source.ethereum_source.blob_source.batcher_address = L1_INBOX_ADDRESS;
+        source.ethereum_source.blob_source.batch_inbox = L1_INBOX_ADDRESS.into();
         let (txs, altda_commitments, encoded_payloads) =
             valid_eip1559_txs_with_altda_commitment_encoded_payload(num);
         source
@@ -374,13 +481,19 @@ mod tests {
         // populate blob source with data
         let mut blob = default_test_blob_source();
         blob.open = true;
-        blob.data = vec![Default::default()];
+        blob.data = vec![InboxEntry::Payload {
+            payload: BlobData::default(),
+            certified: false,
+        }];
 
         // populate calldata source with data
         let mut calldata = CalldataSource::new(chain.clone(), Address::ZERO);
         calldata.open = true;
         calldata.calldata = VecDeque::new();
-        calldata.calldata.push_back(Bytes::default());
+        calldata.calldata.push_back(InboxEntry::Payload {
+            payload: Bytes::default(),
+            certified: false,
+        });
 
         let cfg = RollupConfig {
             hardforks: HardForkConfig {
@@ -465,7 +578,7 @@ mod tests {
         let mut source = default_test_eigenda_data_source();
         let block_info = BlockInfo::default();
         // inbox addr
-        source.ethereum_source.blob_source.batcher_address = L1_INBOX_ADDRESS;
+        source.ethereum_source.blob_source.batch_inbox = L1_INBOX_ADDRESS.into();
 
         let (txs, _, _) = valid_eip1559_txs_with_altda_commitment_encoded_payload(1);
         source
@@ -510,7 +623,7 @@ mod tests {
         // encoded payload corresponding to the data
         let payload = encoded_payloads[0].decode().unwrap();
 
-        assert!(data == payload);
+        assert_eq!(data, InboxData::from(payload));
     }
 
     // inject temporary errors eigenda preimage, before finally derive output
@@ -557,7 +670,10 @@ mod tests {
 
         // altda commitment is consumed
         assert!(source.altda_commitment.is_none());
-        assert!(payload == encoded_payloads[0].decode().unwrap());
+        assert_eq!(
+            payload,
+            InboxData::from(encoded_payloads[0].decode().unwrap())
+        );
     }
 
     // Eth failover
@@ -566,8 +682,8 @@ mod tests {
         let mut source = default_test_eigenda_data_source();
         let block_info = BlockInfo::default();
         // inbox addr
-        source.ethereum_source.blob_source.batcher_address =
-            alloy_primitives::address!("0xffeeddccbbaa0000000000000000000000000000");
+        source.ethereum_source.blob_source.batch_inbox =
+            alloy_primitives::address!("0xffeeddccbbaa0000000000000000000000000000").into();
         let txs = valid_eip1559_txs_with_ethda();
         // inject invalid 1559 transaction
         source
@@ -595,8 +711,8 @@ mod tests {
         let mut source = default_test_eigenda_data_source();
         let block_info = BlockInfo::default();
         // inbox addr
-        source.ethereum_source.blob_source.batcher_address =
-            alloy_primitives::address!("0xc25276A375ec96e7F494A04e4f74a1d4C3EE223A");
+        source.ethereum_source.blob_source.batch_inbox =
+            alloy_primitives::address!("0xc25276A375ec96e7F494A04e4f74a1d4C3EE223A").into();
         // https://sepolia.etherscan.io/tx/0x717e912c4bd0ead87819d8f36ce9e6efc14255900560c6bc05b77dfb7fdb9dc8
         let raw_tx = alloy_primitives::hex::decode("0x02f87583aa36a7098459682f008459bb530b82520894c25276a375ec96e7f494a04e4f74a1d4c3ee223a8803782dace9d9000080c001a08737f84218a42d53cb3ec202fae278a881ddbe9f5e1740ccbdfd5bd74c9878e4a0714b7b5f2f73d6fa6c3edd1474928c678d0f18e96ec9143d1b961c3cd6240d2a").unwrap();
         let eip1559 = TxEnvelope::decode(&mut raw_tx.as_slice()).unwrap();
@@ -628,8 +744,8 @@ mod tests {
         let mut source = default_test_eigenda_data_source();
         let block_info = BlockInfo::default();
         // inbox addr
-        source.ethereum_source.blob_source.batcher_address =
-            alloy_primitives::address!("0x582D8c8675f58430581F2aEd0BE486Bf2576D8DA");
+        source.ethereum_source.blob_source.batch_inbox =
+            alloy_primitives::address!("0x582D8c8675f58430581F2aEd0BE486Bf2576D8DA").into();
         // https://sepolia.etherscan.io/tx/0xcad3c60b0de05a09ba1c91777ee8b218ba1c1ff74d6996ecf8569b951bf03196
         let raw_tx = alloy_primitives::hex::decode("0x02f89b83aa36a783026826843b9aca0084b2d05e0082582a94582d8c8675f58430581f2aed0be486bf2576d8da80ab01010ccedd8300000000001d24960a699284cc26f4ec4d2f22eca56b6401f4225f4b3785818ff7cdb1273ac080a016ee79d3de3df53c4a2687036a39017676cbaa016a143be8e435bcda056fd6a2a066e7987856632908c57339a0e6da0a340c8633e8a9a5f4cf38a0cafec4e3b1e4").unwrap();
         let eip1559 = TxEnvelope::decode(&mut raw_tx.as_slice()).unwrap();
@@ -907,7 +1023,10 @@ mod tests {
             }
             for i in 0..scenario.results.len() {
                 match source.next(&block_info, BATCHER_ADDRESS).await {
-                    Ok(payload) => assert_eq!(Ok(payload), scenario.results[i]),
+                    Ok(payload) => {
+                        assert!(!payload.certified);
+                        assert_eq!(Ok(payload.data), scenario.results[i]);
+                    }
                     Err(e) => assert_eq!(Err(e), scenario.results[i]),
                 }
                 assert_eq!(
@@ -980,7 +1099,10 @@ mod tests {
         }
         for i in 0..scenario.results.len() {
             match source.next(&block_info, BATCHER_ADDRESS).await {
-                Ok(payload) => assert_eq!(Ok(payload), scenario.results[i]),
+                Ok(payload) => {
+                    assert!(!payload.certified);
+                    assert_eq!(Ok(payload.data), scenario.results[i]);
+                }
                 Err(e) => assert_eq!(Err(e), scenario.results[i]),
             }
             assert_eq!(
@@ -1000,4 +1122,386 @@ mod tests {
     }
 
     // (ToDo) add V4 cert to test e2e integration, so that some altda commitment can fail due to recency issue
+
+    /// An inbox reader yielding scripted items, the shape kona's certified selection hands over.
+    #[derive(Debug, Clone, Default)]
+    struct ScriptedInbox {
+        items: VecDeque<InboxData>,
+        seeded_phase: Option<ActivationPhase>,
+        refuses_seed: bool,
+        refuses_hardfork_activation: bool,
+    }
+
+    #[async_trait]
+    impl DataAvailabilityProvider for ScriptedInbox {
+        type Item = InboxData;
+
+        async fn next(&mut self, _: &BlockInfo, _: Address) -> PipelineResult<InboxData> {
+            self.items.pop_front().ok_or(PipelineError::Eof.temp())
+        }
+
+        fn clear(&mut self) {
+            self.items.clear();
+        }
+
+        fn seed_activation_phase(&mut self, phase: ActivationPhase) -> PipelineResult<()> {
+            self.seeded_phase = Some(phase);
+            if self.refuses_seed {
+                return Err(PipelineError::Eof.crit());
+            }
+            Ok(())
+        }
+
+        fn check_hardfork_activation(&self, _: &RollupConfig) -> PipelineResult<()> {
+            if self.refuses_hardfork_activation {
+                return Err(PipelineError::Eof.crit());
+            }
+            Ok(())
+        }
+    }
+
+    type ScriptedSource = EigenDADataSource<
+        TestChainProvider,
+        TestBlobProvider,
+        TestEigenDAPreimageProvider,
+        ScriptedInbox,
+    >;
+
+    fn scripted_source(items: Vec<InboxData>) -> ScriptedSource {
+        EigenDADataSource::with_inbox_source(
+            ScriptedInbox {
+                items: items.into(),
+                seeded_phase: None,
+                refuses_seed: false,
+                refuses_hardfork_activation: false,
+            },
+            default_test_preimage_source(),
+        )
+    }
+
+    fn certified(data: Bytes) -> InboxData {
+        InboxData {
+            data,
+            certified: true,
+        }
+    }
+
+    fn legacy(data: Bytes) -> InboxData {
+        InboxData {
+            data,
+            certified: false,
+        }
+    }
+
+    const CERTIFIED_PAYLOAD: &[u8] = b"certified frames";
+
+    /// Calldata of a certified commitment whose certificate is `length` field elements wide.
+    fn certified_commitment(length: u64) -> (Bytes, CertifiedCommitment) {
+        let point = G1Point {
+            x: U256::from(1),
+            y: U256::from(2),
+        };
+        let calldata = certified_calldata(point, length as u32);
+        let commitment = CertifiedCommitment::from_calldata(&calldata).unwrap();
+        (calldata, commitment)
+    }
+
+    fn certified_payload() -> EncodedPayload {
+        EncodedPayload::encode(CERTIFIED_PAYLOAD).unwrap()
+    }
+
+    fn is_skip(result: &PipelineResult<InboxData>) -> bool {
+        matches!(
+            result,
+            Err(PipelineErrorKind::Temporary(PipelineError::NotEnoughData))
+        )
+    }
+
+    #[tokio::test]
+    async fn certified_item_resolves_to_its_payload() {
+        let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
+        let mut source = scripted_source(vec![certified(calldata)]);
+        source
+            .eigenda_source
+            .eigenda_fetcher
+            .insert_certified_payload(&commitment, Ok(certified_payload()));
+
+        let payload = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.unwrap();
+        assert_eq!(payload, certified(Bytes::from_static(CERTIFIED_PAYLOAD)));
+        assert_eq!(
+            source.eigenda_source.eigenda_fetcher.certified_requests,
+            vec![(commitment.body().clone(), BLOCK_INFO.number)]
+        );
+        assert!(source.certified_commitment.is_none());
+        assert_eq!(
+            source.next(&BLOCK_INFO, BATCHER_ADDRESS).await,
+            Err(PipelineError::Eof.temp())
+        );
+    }
+
+    /// A certified item has no pass-through, and one that is not an attested certified
+    /// commitment aborts derivation without retrieval, as op-node halts on it: the inbox
+    /// accepted it, so only a decoder divergence reaches here, and skipping it would derive the
+    /// items after it, which op-node never derives.
+    #[tokio::test]
+    async fn undecodable_certified_items_abort() {
+        let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
+        let legacy_eigenda: Bytes = alloy_primitives::hex::decode(ALTDA_COMMITMENT_BYTES_1)
+            .unwrap()
+            .into();
+        let mut trailing_byte = calldata.to_vec();
+        trailing_byte.push(0);
+        let undecodable: Vec<(&str, Bytes)> = vec![
+            ("not a commitment", Bytes::from_static(&[0x00, 0x01, 0x02])),
+            ("a legacy EigenDA commitment", legacy_eigenda),
+            ("a trailing byte", trailing_byte.into()),
+            ("empty calldata", Bytes::new()),
+        ];
+
+        for (case, data) in undecodable {
+            let mut source = scripted_source(vec![certified(data), certified(calldata.clone())]);
+            source
+                .eigenda_source
+                .eigenda_fetcher
+                .insert_certified_payload(&commitment, Ok(certified_payload()));
+
+            let result = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await;
+            assert!(
+                matches!(
+                    result,
+                    Err(PipelineErrorKind::Critical(PipelineError::Provider(_)))
+                ),
+                "{case}: {result:?}"
+            );
+            assert!(
+                source
+                    .eigenda_source
+                    .eigenda_fetcher
+                    .certified_requests
+                    .is_empty(),
+                "{case}"
+            );
+        }
+    }
+
+    /// A temporary provider error keeps the decoded commitment: the retry resolves the same one
+    /// without reading another item.
+    #[tokio::test]
+    async fn certified_temporary_error_retries_the_same_commitment() {
+        let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
+        let mut source = scripted_source(vec![
+            certified(calldata),
+            legacy(Bytes::from_static(&[0x00, 0xaa])),
+        ]);
+        source
+            .eigenda_source
+            .eigenda_fetcher
+            .insert_certified_payload(&commitment, Err(TestHokuleaProviderError::Preimage));
+
+        let result = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await;
+        assert!(matches!(
+            result,
+            Err(PipelineErrorKind::Temporary(PipelineError::Provider(_)))
+        ));
+        assert_eq!(source.certified_commitment.as_ref(), Some(&commitment));
+
+        source
+            .eigenda_source
+            .eigenda_fetcher
+            .insert_certified_payload(&commitment, Ok(certified_payload()));
+        let payload = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.unwrap();
+        assert_eq!(payload, certified(Bytes::from_static(CERTIFIED_PAYLOAD)));
+        assert_eq!(
+            source
+                .eigenda_source
+                .eigenda_fetcher
+                .certified_requests
+                .len(),
+            2
+        );
+        assert_eq!(
+            source.next(&BLOCK_INFO, BATCHER_ADDRESS).await,
+            Ok(legacy(Bytes::from_static(&[0x00, 0xaa])))
+        );
+    }
+
+    /// A reset seeds the inbox reader with the recovered phase and drops a certified commitment
+    /// read before the reset's base, so the next call reads a fresh item instead of retrying it.
+    #[tokio::test]
+    async fn activation_seed_drops_the_pending_certified_commitment() {
+        let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
+        let mut source = scripted_source(vec![
+            certified(calldata),
+            legacy(Bytes::from_static(&[0x00, 0xaa])),
+        ]);
+        source
+            .eigenda_source
+            .eigenda_fetcher
+            .insert_certified_payload(&commitment, Err(TestHokuleaProviderError::Preimage));
+        assert!(source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.is_err());
+        assert_eq!(source.certified_commitment.as_ref(), Some(&commitment));
+
+        source
+            .seed_activation_phase(ActivationPhase::Unscheduled)
+            .unwrap();
+
+        assert!(source.certified_commitment.is_none());
+        assert_eq!(
+            source.ethereum_source.seeded_phase,
+            Some(ActivationPhase::Unscheduled)
+        );
+        assert_eq!(
+            source.next(&BLOCK_INFO, BATCHER_ADDRESS).await,
+            Ok(legacy(Bytes::from_static(&[0x00, 0xaa])))
+        );
+
+        // The inbox reader's refusal of the phase reaches the reset.
+        source.ethereum_source.refuses_seed = true;
+        assert_eq!(
+            source.seed_activation_phase(ActivationPhase::Unscheduled),
+            Err(PipelineError::Eof.crit())
+        );
+    }
+
+    /// A decoded certified commitment is never skipped: a payload that does not match it, or a
+    /// provider failure that is not temporary, aborts derivation.
+    #[tokio::test]
+    async fn certified_payload_failures_abort() {
+        let good = certified_payload();
+        let width = good.num_field_element();
+
+        let mut widened = good.serialize().to_vec();
+        widened.resize(widened.len() * 2, 0);
+        let mut bad_header = good.serialize().to_vec();
+        bad_header[0] = 1;
+
+        let cases: Vec<(&str, u64, Result<EncodedPayload, TestHokuleaProviderError>)> = vec![
+            (
+                "width differs from the certificate",
+                width * 2,
+                Ok(good.clone()),
+            ),
+            (
+                "decodes, but is not the canonical encoding",
+                width * 2,
+                Ok(EncodedPayload::deserialize(widened.into())),
+            ),
+            (
+                "does not decode",
+                width,
+                Ok(EncodedPayload::deserialize(bad_header.into())),
+            ),
+            (
+                "provider critical error",
+                width,
+                Err(TestHokuleaProviderError::Critical),
+            ),
+        ];
+        for (name, length, served) in cases {
+            let (calldata, commitment) = certified_commitment(length);
+            let mut source = scripted_source(vec![certified(calldata)]);
+            source
+                .eigenda_source
+                .eigenda_fetcher
+                .insert_certified_payload(&commitment, served);
+            let result = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await;
+            assert!(
+                matches!(result, Err(PipelineErrorKind::Critical(_))),
+                "{name}: {result:?}"
+            );
+        }
+    }
+
+    /// Under the legacy rules a certified commitment is skipped without being retrieved, and the
+    /// legacy path is otherwise unchanged.
+    #[tokio::test]
+    async fn legacy_item_with_certified_type_is_skipped() {
+        let (calldata, _) = certified_commitment(certified_payload().num_field_element());
+        let mut source = scripted_source(vec![
+            legacy(calldata),
+            legacy(Bytes::from_static(&[0x00, 0xaa])),
+        ]);
+        assert!(is_skip(&source.next(&BLOCK_INFO, BATCHER_ADDRESS).await));
+        assert!(source.altda_commitment.is_none());
+        assert!(source
+            .eigenda_source
+            .eigenda_fetcher
+            .certified_requests
+            .is_empty());
+        assert_eq!(
+            source.next(&BLOCK_INFO, BATCHER_ADDRESS).await,
+            Ok(legacy(Bytes::from_static(&[0x00, 0xaa])))
+        );
+    }
+
+    /// The default source reads kona's ethereum source, whose `certified` flag alone routes an
+    /// item: the same calldata resolves under the certified rules and is skipped under the
+    /// legacy ones.
+    #[tokio::test]
+    async fn kona_certified_flag_selects_the_rules() {
+        let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
+        let mut calldata_source = CalldataSource::new(TestChainProvider::default(), Address::ZERO);
+        calldata_source.open = true;
+        calldata_source.calldata = VecDeque::from([
+            InboxEntry::Payload {
+                payload: calldata.clone(),
+                certified: true,
+            },
+            InboxEntry::Payload {
+                payload: calldata,
+                certified: false,
+            },
+        ]);
+        // Pre-Ecotone, so kona reads the calldata source.
+        let ethereum_source = EthereumDataSource::new(
+            default_test_blob_source(),
+            calldata_source,
+            &RollupConfig::default(),
+        );
+        let mut source = EigenDADataSource::new(ethereum_source, default_test_preimage_source());
+        source
+            .eigenda_source
+            .eigenda_fetcher
+            .insert_certified_payload(&commitment, Ok(certified_payload()));
+
+        let payload = source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.unwrap();
+        assert_eq!(payload, certified(Bytes::from_static(CERTIFIED_PAYLOAD)));
+        assert!(is_skip(&source.next(&BLOCK_INFO, BATCHER_ADDRESS).await));
+        assert_eq!(
+            source.eigenda_source.eigenda_fetcher.certified_requests,
+            vec![(commitment.body().clone(), BLOCK_INFO.number)]
+        );
+    }
+
+    #[test]
+    fn clear_drops_a_pending_certified_commitment() {
+        let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
+        let mut source = scripted_source(vec![certified(calldata)]);
+        source.certified_commitment = Some(commitment);
+        source.clear();
+        assert!(source.certified_commitment.is_none());
+        assert!(source.ethereum_source.items.is_empty());
+    }
+
+    /// The inbox reader's verdict on a hardfork activation reopen reaches the pipeline.
+    #[test]
+    fn hardfork_activation_check_is_the_inbox_readers() {
+        // A certified config, under which kona's provided check would refuse: the verdict is the
+        // inbox reader's only if the source forwards the check.
+        let cfg = RollupConfig {
+            block_certification: Some(BlockCertificationConfig {
+                activation_scan_start_l1_block: 0,
+                activation: None,
+            }),
+            ..Default::default()
+        };
+        let mut source = scripted_source(vec![]);
+        assert_eq!(source.check_hardfork_activation(&cfg), Ok(()));
+
+        source.ethereum_source.refuses_hardfork_activation = true;
+        assert_eq!(
+            source.check_hardfork_activation(&cfg),
+            Err(PipelineError::Eof.crit())
+        );
+    }
 }
