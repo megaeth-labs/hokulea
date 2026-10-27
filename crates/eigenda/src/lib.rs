@@ -28,11 +28,12 @@ mod eigenda_preimage;
 pub use eigenda_preimage::EigenDAPreimageSource;
 
 mod eigenda_data;
-pub use eigenda_data::{EncodedPayload, Payload};
+pub use eigenda_data::{EncodedPayload, Payload, PayloadTooLarge};
 
 mod errors;
 pub use errors::{
-    EncodedPayloadDecodingError, HokuleaErrorKind, HokuleaPreimageError, HokuleaStatelessError,
+    CertifiedPayloadError, EncodedPayloadDecodingError, HokuleaErrorKind, HokuleaPreimageError,
+    HokuleaStatelessError,
 };
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+use crate::certified::CertifierClient;
 use crate::eigenda_preimage::OnlineEigenDAPreimageProvider;
 use crate::handler::SingleChainHintHandlerWithEigenDA;
 use anyhow::Result;
@@ -35,6 +36,16 @@ pub struct SingleChainHostWithEigenDA {
         env
     )]
     pub eigenda_proxy_address: Option<String>,
+
+    /// URL of the block certifier's alt-DA server, which serves certified payloads. Defaults to
+    /// the EigenDA proxy URL.
+    #[clap(
+        long,
+        visible_alias = "certifier",
+        requires = "eigenda_proxy_address",
+        env
+    )]
+    pub certifier_address: Option<String>,
 
     /// Verbosity level (-v, -vv, -vvv, etc.)
     /// TODO: think this should be upstreamed to kona_cfg
@@ -122,7 +133,14 @@ impl SingleChainHostWithEigenDA {
         let base_url = Url::parse(url_str)
             .map_err(|_| SingleChainHostError::Other("Failed to parse EigenDA API URL"))?;
 
-        let eigenda_preimage_provider = OnlineEigenDAPreimageProvider::new_http(base_url);
+        let certifier_url = match &self.certifier_address {
+            Some(url) => Url::parse(url)
+                .map_err(|_| SingleChainHostError::Other("Failed to parse certifier URL"))?,
+            None => base_url.clone(),
+        };
+
+        let eigenda_preimage_provider =
+            OnlineEigenDAPreimageProvider::new_http(base_url, CertifierClient::new(certifier_url));
 
         Ok(SingleChainProvidersWithEigenDA {
             kona_providers,

@@ -8,4 +8,4 @@ pub const BYTES_PER_FIELD_ELEMENT: usize = 32;
 pub const ENCODED_PAYLOAD_HEADER_LEN_BYTES: usize = 32;
 /// EigenDA Version in OP Derivation Version Byte
 /// See <https://specs.optimism.io/experimental/alt-da.html#example-commitments>
-pub const ALTDA_DERIVATION_VERSION: u8 = 0x1;
+pub use eigenda_cert::ALTDA_DERIVATION_VERSION;
