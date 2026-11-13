@@ -1,10 +1,9 @@
-use alloy_consensus::Header;
-use alloy_rlp::Decodable;
 use canoe_provider::{CanoeInput, CanoeProvider};
 use canoe_verifier_address_fetcher::CanoeVerifierAddressFetcher;
 use hokulea_proof::eigenda_witness::EigenDAPreimage;
 use kona_preimage::{PreimageKey, PreimageOracleClient};
 use kona_proof::BootInfo;
+use kona_protocol::L1Header;
 use tracing::info;
 
 /// A helper function to create canoe proof by the provided canoe provider.
@@ -27,8 +26,12 @@ where
     let header_rlp = oracle
         .get(PreimageKey::new_keccak256(*boot_info.l1_head))
         .await?;
-    let l1_head_header = Header::decode(&mut header_rlp.as_slice())
+    let l1_head_header: L1Header = alloy_rlp::decode_exact(&header_rlp)
         .map_err(|_| anyhow::Error::msg("cannot rlp decode header in canoe proof generation"))?;
+    anyhow::ensure!(
+        l1_head_header.hash_slow() == boot_info.l1_head,
+        "L1 header hash mismatch in canoe proof generation"
+    );
     let l1_chain_id = boot_info.rollup_config.l1_chain_id;
 
     let mut canoe_inputs = vec![];
@@ -44,7 +47,7 @@ where
             altda_commitment: altda_commitment.clone(),
             claimed_validity: *claimed_validity,
             l1_head_block_hash: boot_info.l1_head,
-            l1_head_block_number: l1_head_header.number,
+            l1_head_block_number: l1_head_header.inner.number,
             l1_chain_id,
             verifier_address: canoe_address_fetcher
                 .fetch_address(l1_chain_id, &altda_commitment.versioned_cert)?,

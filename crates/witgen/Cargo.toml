@@ -1,14 +1,14 @@
 [package]
 name = "hokulea-witgen"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 
 [dependencies]
-alloy-consensus.workspace = true
 alloy-rlp = { workspace = true }
 
 kona-proof.workspace = true
+kona-protocol.workspace = true
 kona-preimage.workspace = true
 hokulea-proof.workspace = true
 hokulea-eigenda.workspace = true
@@ -19,3 +19,8 @@ canoe-verifier-address-fetcher.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+alloy-primitives.workspace = true
+kona-genesis.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
