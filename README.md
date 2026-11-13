@@ -27,6 +27,43 @@ For real-world implementations, both Op-succinct and Kailua integrate Hokulea in
 
 [documentation](./docs/README.md) is also applicable for other integrations, and pay special attention on the trust assumption on certain data structure.
 
+### MegaETH Steel git dependency
+
+Cargo does not propagate a git dependency's root `[patch]` table into the
+consuming workspace. Consumers of the standalone Steel path in
+`mega-hokulea/v1.0.8` must select the reviewed precompile from the same tag:
+
+```toml
+[dependencies]
+canoe-steel-apps = { git = "https://github.com/megaeth-labs/hokulea", tag = "mega-hokulea/v1.0.8", version = "=0.1.1" }
+canoe-steel-methods = { git = "https://github.com/megaeth-labs/hokulea", tag = "mega-hokulea/v1.0.8", version = "=0.1.1" }
+canoe-steel-verifier = { git = "https://github.com/megaeth-labs/hokulea", tag = "mega-hokulea/v1.0.8", version = "=0.1.1" }
+
+[patch.crates-io]
+revm-precompile = { git = "https://github.com/megaeth-labs/hokulea", tag = "mega-hokulea/v1.0.8", package = "revm-precompile" }
+```
+
+With Rust 1.94.1, the reviewed downstream lock was produced and checked with:
+
+```bash
+cargo generate-lockfile
+cargo update -p alloy-rlp --precise 0.3.16
+cargo update -p alloy-rlp-derive --precise 0.3.16
+cargo update -p risc0-zkvm --precise 3.0.3
+cargo update -p risc0-build-ethereum --precise 3.0.1
+cargo update -p risc0-build --precise 3.0.3
+cargo update -p alloy-trie@0.9.9 --precise 0.9.8
+RISC0_BUILD_LOCKED=1 cargo check --locked
+```
+
+The `alloy-trie` pin keeps Reth v1.9.1 on its compatible `HashBuilder` API;
+the RLP and RISC Zero pins reproduce the versions validated by this source
+snapshot. Commit the resulting consumer lockfile. Once dependencies are
+cached, the same graph can be rechecked without network access by adding
+`--offline`. Building `canoe-steel-methods` also requires the RISC Zero Rust
+guest toolchain. This source-only tag does not include a prebuilt guest or
+proof artifact.
+
 ## EigenDA proxy configuration
 Hokulea relies on eigenda proxy for fetching preimage values, including `cert_validity` and `encoded_payload`. For cert validity and encode payload, the preimage comes from proxy and is verified later, whereas the recency window value is derived from hokulea directly.
 
