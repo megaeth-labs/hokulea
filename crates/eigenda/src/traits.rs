@@ -2,7 +2,7 @@ use crate::{errors::HokuleaErrorKind, EncodedPayload};
 use alloc::{boxed::Box, string::ToString};
 use async_trait::async_trait;
 use core::fmt::Display;
-use eigenda_cert::AltDACommitment;
+use eigenda_cert::{AltDACommitment, CertifiedCommitment};
 
 /// This traits defines functions to access preimage oracle for EigenDA blob derivation. See
 /// <https://layr-labs.github.io/eigenda/integration/spec/6-secure-integration.html#derivation-process>
@@ -25,6 +25,19 @@ pub trait EigenDAPreimageProvider {
     async fn get_encoded_payload(
         &mut self,
         altda_commitment: &AltDACommitment,
+    ) -> Result<EncodedPayload, Self::Error>;
+
+    /// Fetch the encoded payload a certified commitment names, retrieved from the block
+    /// certifier at `l1_inclusion_block_number`, the L1 block that included the commitment.
+    ///
+    /// Implementations must return only an encoded payload whose KZG commitment, in evaluation
+    /// form, is the certificate's blob point (`commitment.blob().commitment`): the caller checks
+    /// the width and the encoding, but holds no SRS. A certified commitment has no validity or
+    /// recency query, because the inbox accepting it is its validity.
+    async fn get_certified_encoded_payload(
+        &mut self,
+        commitment: &CertifiedCommitment,
+        l1_inclusion_block_number: u64,
     ) -> Result<EncodedPayload, Self::Error>;
 }
 

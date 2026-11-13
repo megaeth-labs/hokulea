@@ -2,8 +2,9 @@
 
 use crate::errors::HokuleaErrorKind;
 use crate::{EigenDAPreimageProvider, EncodedPayload};
-use alloy_primitives::{map::HashMap, B256};
-use eigenda_cert::AltDACommitment;
+use alloc::vec::Vec;
+use alloy_primitives::{map::HashMap, Bytes, B256};
+use eigenda_cert::{AltDACommitment, CertifiedCommitment};
 
 use alloc::boxed::Box;
 use alloc::string::ToString;
@@ -41,6 +42,10 @@ impl From<TestHokuleaProviderError> for HokuleaErrorKind {
 pub(crate) struct TestEigenDAPreimageProvider {
     pub validities: HashMap<B256, Result<bool, TestHokuleaProviderError>>,
     pub encoded_payloads: HashMap<B256, Result<EncodedPayload, TestHokuleaProviderError>>,
+    // certified encoded payloads keyed by commitment body
+    pub certified_payloads: HashMap<Bytes, Result<EncodedPayload, TestHokuleaProviderError>>,
+    // every certified request served, with its l1 inclusion block number
+    pub certified_requests: Vec<(Bytes, u64)>,
     // a backend error propogated to the client
     pub should_preimage_err: bool,
 }
@@ -62,6 +67,15 @@ impl TestEigenDAPreimageProvider {
     ) {
         self.encoded_payloads
             .insert(altda_commitment.to_digest(), encoded_payload);
+    }
+
+    pub(crate) fn insert_certified_payload(
+        &mut self,
+        commitment: &CertifiedCommitment,
+        encoded_payload: Result<EncodedPayload, TestHokuleaProviderError>,
+    ) {
+        self.certified_payloads
+            .insert(commitment.body().clone(), encoded_payload);
     }
 }
 
@@ -93,6 +107,19 @@ impl EigenDAPreimageProvider for TestEigenDAPreimageProvider {
 
         self.encoded_payloads
             .get(&altda_commitment.to_digest())
+            .unwrap()
+            .clone()
+    }
+
+    async fn get_certified_encoded_payload(
+        &mut self,
+        commitment: &CertifiedCommitment,
+        l1_inclusion_block_number: u64,
+    ) -> Result<EncodedPayload, Self::Error> {
+        self.certified_requests
+            .push((commitment.body().clone(), l1_inclusion_block_number));
+        self.certified_payloads
+            .get(commitment.body())
             .unwrap()
             .clone()
     }

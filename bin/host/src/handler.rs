@@ -1,5 +1,6 @@
 use alloy_primitives::keccak256;
 
+use crate::certified::fetch_certified_payload_hint;
 use crate::cfg::SingleChainHostWithEigenDA;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -34,6 +35,14 @@ impl HintHandler for SingleChainHintHandlerWithEigenDA {
         match hint.ty {
             ExtendedHintType::EigenDACert => {
                 fetch_eigenda_hint(hint, providers, kv).await?;
+            }
+            ExtendedHintType::CertifiedPayload => {
+                fetch_certified_payload_hint(
+                    &hint.data,
+                    providers.eigenda_preimage_provider.certifier(),
+                    kv,
+                )
+                .await?;
             }
             ExtendedHintType::Original(ty) => {
                 let hint_original = Hint {

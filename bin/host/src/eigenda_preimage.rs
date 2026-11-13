@@ -3,11 +3,12 @@ use anyhow::{anyhow, Result};
 use reqwest::{self, Url};
 
 use async_trait::async_trait;
-use eigenda_cert::AltDACommitment;
+use eigenda_cert::{AltDACommitment, CertifiedCommitment};
 use hokulea_eigenda::{
     EigenDAPreimageProvider, EncodedPayload, HokuleaErrorKind, HokuleaPreimageError,
 };
 
+use crate::certified::CertifierClient;
 use crate::status_code::{DerivationError, HostHandlerError, HTTP_RESPONSE_STATUS_CODE_TEAPOT};
 
 /// Currently Hokulea hosts relies on Eigenda-proxy for preimage retrieval.
@@ -34,6 +35,8 @@ pub struct OnlineEigenDAPreimageProvider {
     /// 1. get_validity() populates the cache
     /// 2. get_encoded_payload() retrieves the same entry immediately after
     last_entry: Option<(AltDACommitment, ProxyDerivationStage)>,
+    /// Retrieves certified payloads from the block certifier.
+    certifier: CertifierClient,
 }
 
 // Query parameters configuration for proxy behavior:
@@ -50,12 +53,18 @@ impl OnlineEigenDAPreimageProvider {
     /// The `genesis_time` and `slot_interval` arguments are _optional_ and the
     /// [OnlineEigenDAPreimageProvider] will attempt to load them dynamically at runtime if they are not
     /// provided.
-    pub fn new_http(base: Url) -> Self {
+    pub fn new_http(base: Url, certifier: CertifierClient) -> Self {
         Self {
             base,
             inner: reqwest::Client::new(),
             last_entry: None,
+            certifier,
         }
+    }
+
+    /// The block certifier client serving certified payloads.
+    pub fn certifier(&self) -> &CertifierClient {
+        &self.certifier
     }
 
     /// Fetch data from proxy without caching (takes `&self` for handler usage).
@@ -180,5 +189,19 @@ impl EigenDAPreimageProvider for OnlineEigenDAPreimageProvider {
         Ok(EncodedPayload {
             encoded_payload: derivation_stage.encoded_payload.into(),
         })
+    }
+
+    /// Get a certified encoded payload, verified against the certificate before it is returned
+    async fn get_certified_encoded_payload(
+        &mut self,
+        commitment: &CertifiedCommitment,
+        l1_inclusion_block_number: u64,
+    ) -> Result<EncodedPayload, Self::Error> {
+        let verified = self
+            .certifier
+            .fetch_verified(commitment, l1_inclusion_block_number)
+            .await
+            .map_err(|e| HokuleaErrorKind::Temporary(format!("certified fetch failed: {e:#}")))?;
+        Ok(verified.encoded_payload)
     }
 }
