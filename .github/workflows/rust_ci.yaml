@@ -24,7 +24,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Create read-only dependency token
+        id: deps-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.MEGA_MAXWELL_CLIENT_ID }}
+          private-key: ${{ secrets.MEGA_MAXWELL_PK }}
+          owner: megaeth-labs
+          repositories: mega-block-certifier,mega-kona
+          permission-contents: read
+      - name: Fetch private Git dependencies
+        uses: megaeth-labs/.github/.github/actions/git-auth@54d24b6d6862150ec11585323c433348251d5e27
+        with:
+          token: ${{ steps.deps-token.outputs.token }}
+          command: cargo fetch --locked
       - run: RISC0_SKIP_BUILD=1 SP1_SKIP_PROGRAM_BUILD=true just ${{ matrix.justfile-target }}
+        env:
+          CARGO_NET_OFFLINE: 'true'
   cargo-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -38,9 +54,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Create read-only dependency token
+        id: deps-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.MEGA_MAXWELL_CLIENT_ID }}
+          private-key: ${{ secrets.MEGA_MAXWELL_PK }}
+          owner: megaeth-labs
+          repositories: mega-block-certifier,mega-kona
+          permission-contents: read
+      - name: Fetch private Git dependencies
+        uses: megaeth-labs/.github/.github/actions/git-auth@54d24b6d6862150ec11585323c433348251d5e27
+        with:
+          token: ${{ steps.deps-token.outputs.token }}
+          command: cargo fetch --locked
       - uses: taiki-e/install-action@nextest
       - name: cargo test
         run: RISC0_SKIP_BUILD=1 SP1_SKIP_PROGRAM_BUILD=true just test
+        env:
+          CARGO_NET_OFFLINE: 'true'
   cargo-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -62,6 +94,20 @@ jobs:
         with:
           cache-on-failure: true
           prefix-key: ${{ matrix.target }}
+      - name: Create read-only dependency token
+        id: deps-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.MEGA_MAXWELL_CLIENT_ID }}
+          private-key: ${{ secrets.MEGA_MAXWELL_PK }}
+          owner: megaeth-labs
+          repositories: mega-block-certifier,mega-kona
+          permission-contents: read
+      - name: Fetch private Git dependencies
+        uses: megaeth-labs/.github/.github/actions/git-auth@54d24b6d6862150ec11585323c433348251d5e27
+        with:
+          token: ${{ steps.deps-token.outputs.token }}
+          command: cargo fetch --locked
       - name: Log into ghcr
         uses: docker/login-action@v3
         with:
@@ -70,6 +116,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: fmt + lint
         run: RISC0_SKIP_BUILD=1 SP1_SKIP_PROGRAM_BUILD=true just lint-${{ matrix.target }}
+        env:
+          CARGO_NET_OFFLINE: 'true'
       - name: chown target
         run: |
           sudo chown -R $(id -u):$(id -g) ./target
@@ -85,10 +133,28 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Create read-only dependency token
+        id: deps-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.MEGA_MAXWELL_CLIENT_ID }}
+          private-key: ${{ secrets.MEGA_MAXWELL_PK }}
+          owner: megaeth-labs
+          repositories: mega-block-certifier,mega-kona
+          permission-contents: read
+      - name: Fetch private Git dependencies
+        uses: megaeth-labs/.github/.github/actions/git-auth@54d24b6d6862150ec11585323c433348251d5e27
+        with:
+          token: ${{ steps.deps-token.outputs.token }}
+          command: cargo fetch --locked
       - name: doclint
         run: RISC0_SKIP_BUILD=1 SP1_SKIP_PROGRAM_BUILD=true just lint-docs
+        env:
+          CARGO_NET_OFFLINE: 'true'
       - name: doctest
         run: RISC0_SKIP_BUILD=1 SP1_SKIP_PROGRAM_BUILD=true just test-docs
+        env:
+          CARGO_NET_OFFLINE: 'true'
   unused-deps:
     runs-on: ubuntu-latest
     timeout-minutes: 5 # machete runs very quickly but need longer timeout to install the tools
