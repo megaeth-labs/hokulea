@@ -29,7 +29,11 @@ fn get_allowed_steel_spec_id(chain_id: u64) -> Vec<String> {
         // mainnet
         1 => vec![SpecId::PRAGUE.to_string(), SpecId::OSAKA.to_string()],
         // sepolia
-        11155111 => vec![SpecId::PRAGUE.to_string(), SpecId::OSAKA.to_string()],
+        11155111 => vec![
+            SpecId::PRAGUE.to_string(),
+            SpecId::OSAKA.to_string(),
+            SpecId::AMSTERDAM.to_string(),
+        ],
         // holesky
         17000 => vec![SpecId::PRAGUE.to_string(), SpecId::OSAKA.to_string()],
         // kurtosis devnet
@@ -188,4 +192,62 @@ fn get_steel_active_fork(chain_id: u64, timestamp: u64, block_number: u64) -> St
         _ => panic!("unsupported chain id"),
     };
     spec_id.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::format;
+    use risc0_steel::ethereum::EthEvmInput;
+
+    #[test]
+    fn sepolia_glamsterdam_fork_boundary() {
+        assert_eq!(
+            format!("{:#x}", ETH_SEPOLIA_CHAIN_SPEC.digest()),
+            "0x4c6a19fd3ca4a019f3ab60f4485b4f4043ad076070c9a5cc2d6381f817f5ee62"
+        );
+        assert_eq!(
+            get_steel_active_fork(11155111, 1791294815, 12_109_136),
+            SpecId::OSAKA.to_string()
+        );
+        assert_eq!(
+            get_steel_active_fork(11155111, 1791294816, 12_109_137),
+            SpecId::AMSTERDAM.to_string()
+        );
+        // The legacy Reth advisory remains Osaka. Production journal hashing and guest execution
+        // both use the Steel schedule above; the explicit allow-list makes this reviewed newer
+        // Steel fork admissible without changing the shared SP1 advisory path.
+        assert_eq!(
+            chain_spec::derive_chain_spec_id(11155111, 1791294816, 12_109_137),
+            SpecId::OSAKA
+        );
+        assert!(get_allowed_steel_spec_id(11155111).contains(&SpecId::AMSTERDAM.to_string()));
+    }
+
+    #[test]
+    fn fixed_post_glamsterdam_evm_input_authenticates_full_header() {
+        let bytes = include_bytes!("../tests/fixtures/sepolia-12109137-evm-input.bin");
+        let input: EthEvmInput =
+            bincode::deserialize(bytes).expect("decode the held production Steel input");
+        assert_eq!(bincode::serialize(&input).unwrap(), bytes);
+        assert!(bincode::deserialize::<EthEvmInput>(&bytes[..bytes.len() - 1]).is_err());
+
+        // into_env authenticates the retained state trie against the header state root and seals
+        // the complete header before any contract execution is possible.
+        let env = input.into_env(&ETH_SEPOLIA_CHAIN_SPEC);
+        assert_eq!(env.header().number, 12_109_137);
+        assert_eq!(env.header().timestamp, 1794368376);
+        assert_eq!(env.header().inner().inner().slot_number, Some(11_552_898));
+        assert_eq!(
+            format!(
+                "{:#x}",
+                env.header().inner().inner().block_access_list_hash.unwrap()
+            ),
+            "0x03fe3f2a70e59ad1b0791dd956dce48967ce57743c6b2c40fe51b0a2ac5f7aad"
+        );
+        assert_eq!(
+            format!("{:#x}", env.header().seal()),
+            "0xc00bb482113d9fd6578d356c391570f6830561ecb0603221e68ce55493909413"
+        );
+    }
 }

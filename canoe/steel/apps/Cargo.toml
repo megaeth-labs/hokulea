@@ -1,6 +1,6 @@
 [package]
 name = "canoe-steel-apps"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
@@ -14,3 +14,9 @@ tokio = { workspace = true }
 canoe-provider.workspace = true
 canoe-bindings.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+alloy-primitives.workspace = true
+bincode.workspace = true
+canoe-verifier-address-fetcher.workspace = true
+hokulea-proof.workspace = true

@@ -49,8 +49,8 @@ where
     // For op-succinct, the check is at https://github.com/succinctlabs/op-succinct/blob/b0f190e634ab5b03a3028d4ef88e207186b48337/programs/range/eigenda/src/main.rs#L32
     let witness_with_trusted_data = EigenDAWitnessWithTrustedData {
         l1_head_block_hash: l1_head,
-        l1_head_block_number: header.number,
-        l1_head_block_timestamp: header.timestamp,
+        l1_head_block_number: header.inner.number,
+        l1_head_block_timestamp: header.inner.timestamp,
         l1_chain_id: boot_info.rollup_config.l1_chain_id,
         witness,
     };
