@@ -27,6 +27,10 @@ pub const CERTIFIED_COMMITMENT_TYPE: u8 = 0x80;
 /// `bytes`, so canonicality alone cannot enforce it.
 pub const CERTIFIER_SIG_BYTES: usize = 65;
 
+/// The widest blob EigenDA disperses, in field elements: 2^19, a 16 MiB blob. Blob widths are
+/// powers of two, so a certificate naming another width cannot be EigenDA's.
+pub const MAX_BLOB_LENGTH: u32 = 1 << 19;
+
 /// Preimage key domain byte for the field elements of a certified encoded payload. Sits where the
 /// legacy keys carry `RESERVED_EIGENDA_API_BYTE_INDEX`, so the two key spaces stay apart even
 /// before the digest separates them.
@@ -83,6 +87,9 @@ pub enum CertifiedCommitmentError {
     /// `eigenda_commitment` is not the digest of the certificate's blob commitment.
     #[error("eigenda_commitment does not match the certificate's blob commitment")]
     CommitmentMismatch,
+    /// The certificate's blob length is not a power of two up to [MAX_BLOB_LENGTH].
+    #[error("certificate names a blob of {0} field elements, not a power of two up to 2^19")]
+    BlobLength(u32),
     /// A payload hint is not `0x80 || body || l1_inclusion_block_number`.
     #[error("certified payload hint is malformed")]
     MalformedHint,
@@ -207,7 +214,8 @@ fn decode_body(body: &[u8]) -> Result<BatchCommitment, CertifiedCommitmentError>
 }
 
 /// Reads the certificate's blob commitment and holds it to the attestation:
-/// `eigenda_commitment == keccak256(abi.encode(cert.blobInclusionInfo.blobCertificate.blobHeader.commitment))`.
+/// `eigenda_commitment == keccak256(abi.encode(cert.blobInclusionInfo.blobCertificate.blobHeader.commitment))`,
+/// and its length to a width EigenDA disperses.
 ///
 /// The decode validates words the way op-node's go-ethereum `Unpack` does: a `uint16` or `uint32`
 /// word with dirty high bits is refused, not truncated. Truncating would re-encode clean, so a
@@ -222,6 +230,10 @@ fn attested_blob(
     let blob = cert.blobInclusionInfo.blobCertificate.blobHeader.commitment;
     if keccak256(blob.abi_encode()).as_slice() != eigenda_commitment {
         return Err(CertifiedCommitmentError::CommitmentMismatch);
+    }
+    // The client allocates `length` field elements for the payload before it reads one.
+    if !blob.length.is_power_of_two() || blob.length > MAX_BLOB_LENGTH {
+        return Err(CertifiedCommitmentError::BlobLength(blob.length));
     }
     Ok(AttestedBlob {
         commitment: G1Point {
@@ -498,8 +510,15 @@ mod tests {
                 case.name
             );
 
-            let commitment = CertifiedCommitment::from_calldata(&unhex(&case.calldata))
-                .unwrap_or_else(|e| panic!("{} must be certified: {e}", case.name));
+            let got = CertifiedCommitment::from_calldata(&unhex(&case.calldata));
+            // The synthetic length 0x1234567 gives each byte of its word a distinct value, so the
+            // hash pins the word's layout; no EigenDA blob is that wide, so it is refused for its
+            // width, which is checked only after the attestation matched.
+            if case.name == "synthetic" {
+                assert_eq!(got, Err(CertifiedCommitmentError::BlobLength(case.length)));
+                continue;
+            }
+            let commitment = got.unwrap_or_else(|e| panic!("{} must be certified: {e}", case.name));
             assert_eq!(
                 *commitment.blob(),
                 AttestedBlob {
@@ -598,6 +617,32 @@ mod tests {
             CertifiedCommitment::from_body(&body),
             Err(CertifiedCommitmentError::CertDecode)
         );
+    }
+
+    /// The client sizes its payload buffer by the certificate's length before it reads a byte, so
+    /// a width EigenDA cannot disperse is refused at decode.
+    #[test]
+    fn blob_length_must_be_a_dispersable_width() {
+        for length in [
+            0,
+            3,
+            12,
+            MAX_BLOB_LENGTH - 1,
+            MAX_BLOB_LENGTH << 1,
+            u32::MAX,
+        ] {
+            assert_eq!(
+                CertifiedCommitment::from_calldata(&certified_calldata(point(), length)),
+                Err(CertifiedCommitmentError::BlobLength(length)),
+                "{length}"
+            );
+        }
+        for length in [1, 2, MAX_BLOB_LENGTH] {
+            let commitment =
+                CertifiedCommitment::from_calldata(&certified_calldata(point(), length))
+                    .unwrap_or_else(|e| panic!("{length}: {e}"));
+            assert_eq!(commitment.blob().length, length);
+        }
     }
 
     #[test]

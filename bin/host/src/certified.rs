@@ -6,7 +6,7 @@
 
 use alloy_primitives::{hex, keccak256, FixedBytes, B256};
 use anyhow::{anyhow, ensure, Result};
-use eigenda_cert::CertifiedCommitment;
+use eigenda_cert::{CertifiedCommitment, MAX_BLOB_LENGTH};
 use hokulea_compute_proof::compute_kzg_commitment_and_proof;
 use hokulea_eigenda::{EncodedPayload, HokuleaErrorKind, BYTES_PER_FIELD_ELEMENT};
 use kona_host::SharedKeyValueStore;
@@ -16,8 +16,10 @@ use std::time::Duration;
 use tracing::{info, warn};
 
 /// The largest payload a certified commitment can name: EigenDA's largest blob, 2^19 field
-/// elements, less the header element, at 31 payload bytes each. op-alt-da's `MaxInputSize`.
-pub const MAX_CERTIFIED_PAYLOAD_BYTES: usize = 16_252_897;
+/// elements, less the header element, at 31 payload bytes each. op-alt-da's `MaxInputSize`,
+/// 16_252_897.
+pub const MAX_CERTIFIED_PAYLOAD_BYTES: usize =
+    (MAX_BLOB_LENGTH as usize - 1) * (BYTES_PER_FIELD_ELEMENT - 1);
 
 /// Why a certified payload could not be served. The kinds differ in whether asking again can
 /// help, which is what the provider loop needs to know.

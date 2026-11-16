@@ -16,7 +16,7 @@ pub mod v4_cert;
 pub use altda_commitment::{AltDACommitment, AltDACommitmentParseError, EigenDAVersionedCert};
 pub use certified::{
     AttestedBlob, CertifiedCommitment, CertifiedCommitmentError, ALTDA_DERIVATION_VERSION,
-    CERTIFIED_COMMITMENT_TYPE,
+    CERTIFIED_COMMITMENT_TYPE, MAX_BLOB_LENGTH,
 };
 pub use v2_cert::EigenDACertV2;
 pub use v3_cert::EigenDACertV3;
