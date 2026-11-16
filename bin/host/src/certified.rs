@@ -8,7 +8,7 @@ use alloy_primitives::{hex, keccak256, FixedBytes, B256};
 use anyhow::{anyhow, ensure, Result};
 use eigenda_cert::CertifiedCommitment;
 use hokulea_compute_proof::compute_kzg_commitment_and_proof;
-use hokulea_eigenda::{EncodedPayload, BYTES_PER_FIELD_ELEMENT};
+use hokulea_eigenda::{EncodedPayload, HokuleaErrorKind, BYTES_PER_FIELD_ELEMENT};
 use kona_host::SharedKeyValueStore;
 use kona_preimage::{PreimageKey, PreimageKeyType};
 use reqwest::Url;
@@ -18,6 +18,29 @@ use tracing::{info, warn};
 /// The largest payload a certified commitment can name: EigenDA's largest blob, 2^19 field
 /// elements, less the header element, at 31 payload bytes each. op-alt-da's `MaxInputSize`.
 pub const MAX_CERTIFIED_PAYLOAD_BYTES: usize = 16_252_897;
+
+/// Why a certified payload could not be served. The kinds differ in whether asking again can
+/// help, which is what the provider loop needs to know.
+#[derive(Debug, thiserror::Error)]
+pub enum CertifiedFetchError {
+    /// The certifier did not answer with a payload: unreachable, an error status, or too large a
+    /// body. A later attempt may succeed.
+    #[error("certified payload retrieval failed: {0:#}")]
+    Retrieval(anyhow::Error),
+    /// The certifier answered with bytes that do not match the certificate. The certificate is
+    /// fixed, so no later attempt can make them match.
+    #[error("certified payload does not match its certificate: {0}")]
+    Verification(String),
+}
+
+impl From<CertifiedFetchError> for HokuleaErrorKind {
+    fn from(e: CertifiedFetchError) -> Self {
+        match e {
+            CertifiedFetchError::Retrieval(_) => Self::Temporary(e.to_string()),
+            CertifiedFetchError::Verification(_) => Self::Critical(e.to_string()),
+        }
+    }
+}
 
 const DEFAULT_ATTEMPTS: u32 = 3;
 const DEFAULT_BACKOFF: Duration = Duration::from_millis(500);
@@ -58,29 +81,37 @@ impl CertifierClient {
         &self,
         commitment: &CertifiedCommitment,
         l1_inclusion_block_number: u64,
-    ) -> Result<VerifiedCertifiedPayload> {
+    ) -> Result<VerifiedCertifiedPayload, CertifiedFetchError> {
         let payload = self
             .get_payload(commitment, l1_inclusion_block_number)
-            .await?;
-        let encoded_payload = EncodedPayload::encode(&payload)?;
+            .await
+            .map_err(CertifiedFetchError::Retrieval)?;
+        let encoded_payload = EncodedPayload::encode(&payload)
+            .map_err(|e| CertifiedFetchError::Verification(e.to_string()))?;
 
         // The width costs nothing, the commitment an FFT and an MSM over the retrieved bytes.
         let blob = commitment.blob();
-        ensure!(
-            encoded_payload.num_field_element() == u64::from(blob.length),
-            "certified payload encodes to {} field elements, but the certificate names {}",
-            encoded_payload.num_field_element(),
-            blob.length
-        );
+        if encoded_payload.num_field_element() != u64::from(blob.length) {
+            return Err(CertifiedFetchError::Verification(format!(
+                "certified payload encodes to {} field elements, but the certificate names {}",
+                encoded_payload.num_field_element(),
+                blob.length
+            )));
+        }
         let (point, kzg_proof) = compute_kzg_commitment_and_proof(encoded_payload.serialize())
-            .map_err(|e| anyhow!("failed to commit to the certified payload: {e}"))?;
+            .map_err(|e| {
+                CertifiedFetchError::Verification(format!(
+                    "failed to commit to the certified payload: {e}"
+                ))
+            })?;
         let mut expected = FixedBytes::<64>::ZERO;
         expected[..32].copy_from_slice(&blob.commitment.x.to_be_bytes::<32>());
         expected[32..].copy_from_slice(&blob.commitment.y.to_be_bytes::<32>());
-        ensure!(
-            point == expected,
-            "certified payload commits to {point}, but the certificate names {expected}"
-        );
+        if point != expected {
+            return Err(CertifiedFetchError::Verification(format!(
+                "certified payload commits to {point}, but the certificate names {expected}"
+            )));
+        }
 
         Ok(VerifiedCertifiedPayload {
             encoded_payload,
@@ -195,6 +226,7 @@ fn global_generic_key(key_template: &[u8; 80]) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eigenda_preimage::OnlineEigenDAPreimageProvider;
     use alloy_primitives::U256;
     use eigenda_cert::certified::test_utils::certified_calldata;
     use eigenda_cert::G1Point;
@@ -421,6 +453,42 @@ mod tests {
         assert!(format!("{err:#}").contains("500"), "{err:#}");
         assert_eq!(requests.lock().unwrap().len(), DEFAULT_ATTEMPTS as usize);
         assert!(nothing_stored(&kv, &commitment).await);
+    }
+
+    /// The provider loop retries a temporary error forever and halts on a critical one: bytes that
+    /// fail their certificate fail it on every attempt, a certifier that does not answer may later.
+    #[tokio::test]
+    async fn verification_failure_is_critical_and_retrieval_failure_temporary() {
+        let cases = [
+            (Response::ok(OTHER_PAYLOAD.as_bytes()), "commits to", true),
+            (Response::ok(&[7u8; 200]), "field elements", true),
+            (
+                Response {
+                    status: 500,
+                    body: b"boom".to_vec(),
+                    content_length: true,
+                },
+                "500",
+                false,
+            ),
+        ];
+        for (response, reason, critical) in cases {
+            let (certifier, _) = fake_certifier(response).await;
+            let proxy = Url::parse("http://127.0.0.1:1").unwrap();
+            let mut provider = OnlineEigenDAPreimageProvider::new_http(proxy, certifier);
+
+            let err = provider
+                .get_certified_encoded_payload(&commitment(), 77)
+                .await
+                .unwrap_err();
+            match (critical, &err) {
+                (true, HokuleaErrorKind::Critical(msg))
+                | (false, HokuleaErrorKind::Temporary(msg)) => {
+                    assert!(msg.contains(reason), "{err}")
+                }
+                _ => panic!("{reason}: wrong kind {err:?}"),
+            }
+        }
     }
 
     /// A preimage oracle client over the host's key-value store, recording the hints it writes.

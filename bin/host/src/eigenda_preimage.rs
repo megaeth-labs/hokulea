@@ -200,8 +200,7 @@ impl EigenDAPreimageProvider for OnlineEigenDAPreimageProvider {
         let verified = self
             .certifier
             .fetch_verified(commitment, l1_inclusion_block_number)
-            .await
-            .map_err(|e| HokuleaErrorKind::Temporary(format!("certified fetch failed: {e:#}")))?;
+            .await?;
         Ok(verified.encoded_payload)
     }
 }
