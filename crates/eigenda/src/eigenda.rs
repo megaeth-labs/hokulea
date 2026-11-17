@@ -35,9 +35,10 @@ where
     /// altda commitment, if we step in by calling next and it is Some, it means previous
     /// call has a temporary error
     pub altda_commitment: Option<AltDACommitment>,
-    /// certified commitment whose payload a previous call failed to fetch with a temporary error.
-    /// The inbox item is already consumed, so the retry has to resolve this one.
-    pub certified_commitment: Option<CertifiedCommitment>,
+    /// certified commitment whose payload a previous call failed to fetch with a temporary error,
+    /// with the number of the L1 block it was read from. The inbox item is already consumed, so
+    /// the retry has to resolve this one, at that block.
+    pub certified_commitment: Option<(CertifiedCommitment, u64)>,
     _l1_providers: PhantomData<(C, B)>,
 }
 
@@ -104,7 +105,7 @@ where
                     "Hokulea certified derivation retries after a temporary error: {}",
                     e
                 );
-                self.certified_commitment = Some(commitment);
+                self.certified_commitment = Some((commitment, l1_inclusion_bn));
                 Err(PipelineError::Provider(e).temp())
             }
             Err(HokuleaErrorKind::Discard(e)) | Err(HokuleaErrorKind::Critical(e)) => {
@@ -134,8 +135,8 @@ where
         batcher_addr: Address,
     ) -> PipelineResult<Self::Item> {
         debug!("Data Available Source next {} {}", block_ref, batcher_addr);
-        if let Some(commitment) = self.certified_commitment.take() {
-            return self.resolve_certified(commitment, block_ref.number).await;
+        if let Some((commitment, l1_inclusion_bn)) = self.certified_commitment.take() {
+            return self.resolve_certified(commitment, l1_inclusion_bn).await;
         }
 
         // if there is no data, fetch one from ethereum source.
@@ -1303,7 +1304,10 @@ mod tests {
             result,
             Err(PipelineErrorKind::Temporary(PipelineError::Provider(_)))
         ));
-        assert_eq!(source.certified_commitment.as_ref(), Some(&commitment));
+        assert_eq!(
+            source.certified_commitment,
+            Some((commitment.clone(), BLOCK_INFO.number))
+        );
 
         source
             .eigenda_source
@@ -1325,6 +1329,40 @@ mod tests {
         );
     }
 
+    /// The retry of a pending certified commitment asks for it at the L1 block it was read from,
+    /// whatever block the retrying call names: the certifier lookup and the payload hint are
+    /// keyed by the inclusion block.
+    #[tokio::test]
+    async fn certified_retry_keeps_the_inclusion_block() {
+        let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
+        let mut source = scripted_source(vec![certified(calldata)]);
+        source
+            .eigenda_source
+            .eigenda_fetcher
+            .insert_certified_payload(&commitment, Err(TestHokuleaProviderError::Preimage));
+        assert!(source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.is_err());
+
+        source
+            .eigenda_source
+            .eigenda_fetcher
+            .insert_certified_payload(&commitment, Ok(certified_payload()));
+        let later_block = BlockInfo {
+            number: BLOCK_INFO.number + 1,
+            ..BLOCK_INFO
+        };
+        let payload = source.next(&later_block, BATCHER_ADDRESS).await.unwrap();
+
+        assert_eq!(payload, certified(Bytes::from_static(CERTIFIED_PAYLOAD)));
+        let requested_blocks: Vec<u64> = source
+            .eigenda_source
+            .eigenda_fetcher
+            .certified_requests
+            .iter()
+            .map(|(_, l1_inclusion_bn)| *l1_inclusion_bn)
+            .collect();
+        assert_eq!(requested_blocks, vec![BLOCK_INFO.number; 2]);
+    }
+
     /// A reset seeds the inbox reader with the recovered phase and drops a certified commitment
     /// read before the reset's base, so the next call reads a fresh item instead of retrying it.
     #[tokio::test]
@@ -1339,7 +1377,10 @@ mod tests {
             .eigenda_fetcher
             .insert_certified_payload(&commitment, Err(TestHokuleaProviderError::Preimage));
         assert!(source.next(&BLOCK_INFO, BATCHER_ADDRESS).await.is_err());
-        assert_eq!(source.certified_commitment.as_ref(), Some(&commitment));
+        assert_eq!(
+            source.certified_commitment,
+            Some((commitment.clone(), BLOCK_INFO.number))
+        );
 
         source
             .seed_activation_phase(ActivationPhase::Unscheduled)
@@ -1477,7 +1518,7 @@ mod tests {
     fn clear_drops_a_pending_certified_commitment() {
         let (calldata, commitment) = certified_commitment(certified_payload().num_field_element());
         let mut source = scripted_source(vec![certified(calldata)]);
-        source.certified_commitment = Some(commitment);
+        source.certified_commitment = Some((commitment, BLOCK_INFO.number));
         source.clear();
         assert!(source.certified_commitment.is_none());
         assert!(source.ethereum_source.items.is_empty());
