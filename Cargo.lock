@@ -6289,7 +6289,7 @@ dependencies = [
 [[package]]
 name = "kona-cli"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-chains",
  "alloy-primitives",
@@ -6309,7 +6309,7 @@ dependencies = [
 [[package]]
 name = "kona-client"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-consensus 1.1.3",
  "alloy-eips 1.1.3",
@@ -6350,7 +6350,7 @@ dependencies = [
 [[package]]
 name = "kona-derive"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-consensus 1.1.3",
  "alloy-eips 1.1.3",
@@ -6376,7 +6376,7 @@ dependencies = [
 [[package]]
 name = "kona-driver"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-consensus 1.1.3",
  "alloy-primitives",
@@ -6397,7 +6397,7 @@ dependencies = [
 [[package]]
 name = "kona-executor"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-consensus 1.1.3",
  "alloy-eips 1.1.3",
@@ -6430,7 +6430,7 @@ dependencies = [
 [[package]]
 name = "kona-genesis"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-chains",
  "alloy-consensus 1.1.3",
@@ -6451,7 +6451,7 @@ dependencies = [
 [[package]]
 name = "kona-hardforks"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-eips 1.1.3",
  "alloy-primitives",
@@ -6462,7 +6462,7 @@ dependencies = [
 [[package]]
 name = "kona-host"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-consensus 1.1.3",
  "alloy-eips 1.1.3",
@@ -6514,7 +6514,7 @@ dependencies = [
 [[package]]
 name = "kona-interop"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-consensus 1.1.3",
  "alloy-eips 1.1.3",
@@ -6536,7 +6536,7 @@ dependencies = [
 [[package]]
 name = "kona-log"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "risc0-zkvm",
 ]
@@ -6544,12 +6544,12 @@ dependencies = [
 [[package]]
 name = "kona-macros"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 
 [[package]]
 name = "kona-megaevm"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-hardforks 0.2.13",
  "alloy-op-hardforks 0.2.13",
@@ -6561,7 +6561,7 @@ dependencies = [
 [[package]]
 name = "kona-mpt"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -6573,7 +6573,7 @@ dependencies = [
 [[package]]
 name = "kona-preimage"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-primitives",
  "async-channel",
@@ -6586,7 +6586,7 @@ dependencies = [
 [[package]]
 name = "kona-proof"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-consensus 1.1.3",
  "alloy-eips 1.1.3",
@@ -6624,7 +6624,7 @@ dependencies = [
 [[package]]
 name = "kona-proof-interop"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-consensus 1.1.3",
  "alloy-eips 1.1.3",
@@ -6654,7 +6654,7 @@ dependencies = [
 [[package]]
 name = "kona-protocol"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloc-no-stdlib",
  "alloy-consensus 1.1.3",
@@ -6687,7 +6687,7 @@ dependencies = [
 [[package]]
 name = "kona-providers-alloy"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-consensus 1.1.3",
  "alloy-eips 1.1.3",
@@ -6719,7 +6719,7 @@ dependencies = [
 [[package]]
 name = "kona-registry"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-chains",
  "alloy-eips 1.1.3",
@@ -6739,7 +6739,7 @@ dependencies = [
 [[package]]
 name = "kona-std-fpvm"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "async-trait",
  "buddy_system_allocator",
@@ -6751,7 +6751,7 @@ dependencies = [
 [[package]]
 name = "kona-std-fpvm-proc"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "cfg-if",
  "kona-std-fpvm",
@@ -6763,7 +6763,7 @@ dependencies = [
 [[package]]
 name = "kona-system-contracts"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-primitives",
  "mega-evm",
@@ -11139,7 +11139,7 @@ source = "git+https://github.com/megaeth-labs/salt.git?tag=v1.0.6#945d5bdad8c1b8
 [[package]]
 name = "salt-stateless"
 version = "1.2.1"
-source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d#5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d"
+source = "git+https://github.com/megaeth-labs/mega-kona.git?rev=d2a94aa7c3ac31825b9580b4a31d605f83c522b5#d2a94aa7c3ac31825b9580b4a31d605f83c522b5"
 dependencies = [
  "alloy-eips 1.1.3",
  "alloy-primitives",
