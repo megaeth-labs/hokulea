@@ -8,7 +8,7 @@ use hokulea_eigenda::{
     EigenDAPreimageProvider, EncodedPayload, HokuleaErrorKind, HokuleaPreimageError,
 };
 
-use crate::certified::CertifierClient;
+use crate::certified::{CertifiedFetchError, CertifierClient};
 use crate::status_code::{DerivationError, HostHandlerError, HTTP_RESPONSE_STATUS_CODE_TEAPOT};
 
 /// Currently Hokulea hosts relies on Eigenda-proxy for preimage retrieval.
@@ -35,8 +35,8 @@ pub struct OnlineEigenDAPreimageProvider {
     /// 1. get_validity() populates the cache
     /// 2. get_encoded_payload() retrieves the same entry immediately after
     last_entry: Option<(AltDACommitment, ProxyDerivationStage)>,
-    /// Retrieves certified payloads from the block certifier.
-    certifier: CertifierClient,
+    /// Retrieves certified payloads from the block certifier, if one is configured.
+    certifier: Option<CertifierClient>,
 }
 
 // Query parameters configuration for proxy behavior:
@@ -53,7 +53,7 @@ impl OnlineEigenDAPreimageProvider {
     /// The `genesis_time` and `slot_interval` arguments are _optional_ and the
     /// [OnlineEigenDAPreimageProvider] will attempt to load them dynamically at runtime if they are not
     /// provided.
-    pub fn new_http(base: Url, certifier: CertifierClient) -> Self {
+    pub fn new_http(base: Url, certifier: Option<CertifierClient>) -> Self {
         Self {
             base,
             inner: reqwest::Client::new(),
@@ -62,9 +62,9 @@ impl OnlineEigenDAPreimageProvider {
         }
     }
 
-    /// The block certifier client serving certified payloads.
-    pub fn certifier(&self) -> &CertifierClient {
-        &self.certifier
+    /// The block certifier client serving certified payloads, if one is configured.
+    pub fn certifier(&self) -> Option<&CertifierClient> {
+        self.certifier.as_ref()
     }
 
     /// Fetch data from proxy without caching (takes `&self` for handler usage).
@@ -197,8 +197,11 @@ impl EigenDAPreimageProvider for OnlineEigenDAPreimageProvider {
         commitment: &CertifiedCommitment,
         l1_inclusion_block_number: u64,
     ) -> Result<EncodedPayload, Self::Error> {
-        let verified = self
+        let certifier = self
             .certifier
+            .as_ref()
+            .ok_or(CertifiedFetchError::NoCertifier)?;
+        let verified = certifier
             .fetch_verified(commitment, l1_inclusion_block_number)
             .await?;
         Ok(verified.encoded_payload)

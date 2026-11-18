@@ -25,6 +25,10 @@ pub const MAX_CERTIFIED_PAYLOAD_BYTES: usize =
 /// help, which is what the provider loop needs to know.
 #[derive(Debug, thiserror::Error)]
 pub enum CertifiedFetchError {
+    /// The host has no certifier address. The EigenDA proxy serves no certified payloads, so no
+    /// later attempt can succeed.
+    #[error("certified payload requested but no certifier configured")]
+    NoCertifier,
     /// The certifier did not answer with a payload: unreachable, an error status, or too large a
     /// body. A later attempt may succeed.
     #[error("certified payload retrieval failed: {0:#}")]
@@ -39,7 +43,9 @@ impl From<CertifiedFetchError> for HokuleaErrorKind {
     fn from(e: CertifiedFetchError) -> Self {
         match e {
             CertifiedFetchError::Retrieval(_) => Self::Temporary(e.to_string()),
-            CertifiedFetchError::Verification(_) => Self::Critical(e.to_string()),
+            CertifiedFetchError::NoCertifier | CertifiedFetchError::Verification(_) => {
+                Self::Critical(e.to_string())
+            }
         }
     }
 }
@@ -188,9 +194,10 @@ impl CertifierClient {
 /// backend retries the hint.
 pub async fn fetch_certified_payload_hint(
     hint_data: &[u8],
-    certifier: &CertifierClient,
+    certifier: Option<&CertifierClient>,
     kv: SharedKeyValueStore,
 ) -> Result<()> {
+    let certifier = certifier.ok_or(CertifiedFetchError::NoCertifier)?;
     let (commitment, l1_inclusion_block_number) = CertifiedCommitment::from_payload_hint(hint_data)
         .map_err(|e| anyhow!("malformed certified payload hint: {e}"))?;
     let verified = certifier
@@ -228,8 +235,9 @@ fn global_generic_key(key_template: &[u8; 80]) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::SingleChainHostWithEigenDA;
     use crate::eigenda_preimage::OnlineEigenDAPreimageProvider;
-    use alloy_primitives::U256;
+    use alloy_primitives::{Bytes, U256};
     use eigenda_cert::certified::test_utils::certified_calldata;
     use eigenda_cert::G1Point;
     use hokulea_eigenda::EigenDAPreimageProvider;
@@ -282,7 +290,7 @@ mod tests {
 
     /// A one-route HTTP/1.1 server answering every request with `response`, recording each
     /// request target.
-    async fn fake_certifier(response: Response) -> (CertifierClient, Arc<Mutex<Vec<String>>>) {
+    async fn fake_server(response: Response) -> (Url, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = Url::parse(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -316,9 +324,23 @@ mod tests {
                 let _ = stream.shutdown().await;
             }
         });
+        (base, requests)
+    }
+
+    async fn fake_certifier(response: Response) -> (CertifierClient, Arc<Mutex<Vec<String>>>) {
+        let (base, requests) = fake_server(response).await;
         let mut client = CertifierClient::new(base);
         client.backoff = Duration::ZERO;
         (client, requests)
+    }
+
+    /// A host configured with only the EigenDA proxy at `proxy`.
+    fn host_without_certifier(proxy: &Url) -> SingleChainHostWithEigenDA {
+        SingleChainHostWithEigenDA {
+            eigenda_proxy_address: Some(proxy.to_string()),
+            certifier_address: None,
+            ..Default::default()
+        }
     }
 
     fn memory_kv() -> SharedKeyValueStore {
@@ -347,7 +369,7 @@ mod tests {
         let commitment = commitment();
         let kv = memory_kv();
 
-        fetch_certified_payload_hint(&commitment.payload_hint(77), &certifier, kv.clone())
+        fetch_certified_payload_hint(&commitment.payload_hint(77), Some(&certifier), kv.clone())
             .await
             .unwrap();
 
@@ -386,10 +408,13 @@ mod tests {
         let commitment = commitment();
         let kv = memory_kv();
 
-        let err =
-            fetch_certified_payload_hint(&commitment.payload_hint(77), &certifier, kv.clone())
-                .await
-                .unwrap_err();
+        let err = fetch_certified_payload_hint(
+            &commitment.payload_hint(77),
+            Some(&certifier),
+            kv.clone(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("commits to"), "{err}");
         assert!(nothing_stored(&kv, &commitment).await);
     }
@@ -400,10 +425,13 @@ mod tests {
         let commitment = commitment();
         let kv = memory_kv();
 
-        let err =
-            fetch_certified_payload_hint(&commitment.payload_hint(77), &certifier, kv.clone())
-                .await
-                .unwrap_err();
+        let err = fetch_certified_payload_hint(
+            &commitment.payload_hint(77),
+            Some(&certifier),
+            kv.clone(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("field elements"), "{err}");
         assert!(nothing_stored(&kv, &commitment).await);
     }
@@ -420,10 +448,13 @@ mod tests {
             let commitment = commitment();
             let kv = memory_kv();
 
-            let err =
-                fetch_certified_payload_hint(&commitment.payload_hint(77), &certifier, kv.clone())
-                    .await
-                    .unwrap_err();
+            let err = fetch_certified_payload_hint(
+                &commitment.payload_hint(77),
+                Some(&certifier),
+                kv.clone(),
+            )
+            .await
+            .unwrap_err();
             // An announced length is refused before the body is read, a streamed body once the
             // cap is crossed.
             let refusal = if content_length {
@@ -448,10 +479,13 @@ mod tests {
         let commitment = commitment();
         let kv = memory_kv();
 
-        let err =
-            fetch_certified_payload_hint(&commitment.payload_hint(77), &certifier, kv.clone())
-                .await
-                .unwrap_err();
+        let err = fetch_certified_payload_hint(
+            &commitment.payload_hint(77),
+            Some(&certifier),
+            kv.clone(),
+        )
+        .await
+        .unwrap_err();
         assert!(format!("{err:#}").contains("500"), "{err:#}");
         assert_eq!(requests.lock().unwrap().len(), DEFAULT_ATTEMPTS as usize);
         assert!(nothing_stored(&kv, &commitment).await);
@@ -477,7 +511,7 @@ mod tests {
         for (response, reason, critical) in cases {
             let (certifier, _) = fake_certifier(response).await;
             let proxy = Url::parse("http://127.0.0.1:1").unwrap();
-            let mut provider = OnlineEigenDAPreimageProvider::new_http(proxy, certifier);
+            let mut provider = OnlineEigenDAPreimageProvider::new_http(proxy, Some(certifier));
 
             let err = provider
                 .get_certified_encoded_payload(&commitment(), 77)
@@ -491,6 +525,66 @@ mod tests {
                 _ => panic!("{reason}: wrong kind {err:?}"),
             }
         }
+    }
+
+    /// Without a certifier address there is nowhere to fetch a certified payload from: both
+    /// paths refuse at once, and the EigenDA proxy, which serves no certified payloads, is never
+    /// asked.
+    #[tokio::test]
+    async fn certified_fetch_without_certifier_fails_without_asking_the_proxy() {
+        const NO_CERTIFIER: &str = "certified payload requested but no certifier configured";
+        let (proxy, requests) = fake_server(Response {
+            status: 404,
+            body: Vec::new(),
+            content_length: true,
+        })
+        .await;
+        let mut provider = host_without_certifier(&proxy)
+            .eigenda_preimage_provider()
+            .unwrap();
+        let commitment = commitment();
+
+        let err = provider
+            .get_certified_encoded_payload(&commitment, 77)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, HokuleaErrorKind::Critical(msg) if msg == NO_CERTIFIER),
+            "{err:?}"
+        );
+
+        let kv = memory_kv();
+        let err = fetch_certified_payload_hint(
+            &commitment.payload_hint(77),
+            provider.certifier(),
+            kv.clone(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.to_string(), NO_CERTIFIER);
+        assert!(nothing_stored(&kv, &commitment).await);
+
+        assert!(requests.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn legacy_fetch_without_certifier_asks_the_proxy() {
+        let (proxy, requests) = fake_server(Response::ok(PAYLOAD.as_bytes())).await;
+        let provider = host_without_certifier(&proxy)
+            .eigenda_preimage_provider()
+            .unwrap();
+
+        let stage = provider
+            .fetch_data_from_proxy(&Bytes::from_static(&[0x01, 0x00, 0xab]))
+            .await
+            .unwrap();
+
+        assert!(stage.is_valid_cert && stage.pass_recency_check);
+        assert_eq!(stage.encoded_payload, PAYLOAD.as_bytes());
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec!["/get/0100ab?commitment_mode=optimism_generic&return_encoded_payload=true"]
+        );
     }
 
     /// A preimage oracle client over the host's key-value store, recording the hints it writes.
@@ -538,7 +632,7 @@ mod tests {
         let (certifier, _) = fake_certifier(Response::ok(PAYLOAD.as_bytes())).await;
         let commitment = commitment();
         let kv = memory_kv();
-        fetch_certified_payload_hint(&commitment.payload_hint(77), &certifier, kv.clone())
+        fetch_certified_payload_hint(&commitment.payload_hint(77), Some(&certifier), kv.clone())
             .await
             .unwrap();
 
@@ -581,7 +675,7 @@ mod tests {
         let kv = memory_kv();
 
         assert!(
-            fetch_certified_payload_hint(&hint[1..], &certifier, kv.clone())
+            fetch_certified_payload_hint(&hint[1..], Some(&certifier), kv.clone())
                 .await
                 .is_err()
         );
