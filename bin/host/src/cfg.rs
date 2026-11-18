@@ -1,3 +1,4 @@
+use crate::certified::CertifierClient;
 use crate::eigenda_preimage::OnlineEigenDAPreimageProvider;
 use crate::handler::SingleChainHintHandlerWithEigenDA;
 use anyhow::Result;
@@ -35,6 +36,16 @@ pub struct SingleChainHostWithEigenDA {
         env
     )]
     pub eigenda_proxy_address: Option<String>,
+
+    /// URL of the block certifier's alt-DA server, which serves certified payloads. Without it,
+    /// a certified payload cannot be fetched.
+    #[clap(
+        long,
+        visible_alias = "certifier",
+        requires = "eigenda_proxy_address",
+        env
+    )]
+    pub certifier_address: Option<String>,
 
     /// Verbosity level (-v, -vv, -vvv, etc.)
     /// TODO: think this should be upstreamed to kona_cfg
@@ -113,7 +124,18 @@ impl SingleChainHostWithEigenDA {
         &self,
     ) -> Result<SingleChainProvidersWithEigenDA, SingleChainHostError> {
         let kona_providers = self.kona_cfg.create_providers().await?;
+        let eigenda_preimage_provider = self.eigenda_preimage_provider()?;
 
+        Ok(SingleChainProvidersWithEigenDA {
+            kona_providers,
+            eigenda_preimage_provider,
+        })
+    }
+
+    /// Creates the EigenDA preimage provider from the proxy and certifier addresses.
+    pub(crate) fn eigenda_preimage_provider(
+        &self,
+    ) -> Result<OnlineEigenDAPreimageProvider, SingleChainHostError> {
         let url_str = self
             .eigenda_proxy_address
             .as_ref()
@@ -122,12 +144,17 @@ impl SingleChainHostWithEigenDA {
         let base_url = Url::parse(url_str)
             .map_err(|_| SingleChainHostError::Other("Failed to parse EigenDA API URL"))?;
 
-        let eigenda_preimage_provider = OnlineEigenDAPreimageProvider::new_http(base_url);
+        let certifier = self
+            .certifier_address
+            .as_deref()
+            .map(|url| {
+                Url::parse(url)
+                    .map(CertifierClient::new)
+                    .map_err(|_| SingleChainHostError::Other("Failed to parse certifier URL"))
+            })
+            .transpose()?;
 
-        Ok(SingleChainProvidersWithEigenDA {
-            kona_providers,
-            eigenda_preimage_provider,
-        })
+        Ok(OnlineEigenDAPreimageProvider::new_http(base_url, certifier))
     }
 
     /// Starts the host in native mode, running both the client and preimage server in the same

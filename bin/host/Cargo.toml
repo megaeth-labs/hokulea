@@ -10,6 +10,7 @@ mega-evm = ["hokulea-client-bin/mega-evm"]
 [dependencies]
 # Hokulea and EigenDA
 hokulea-proof.workspace = true
+hokulea-compute-proof.workspace = true
 hokulea-client-bin.workspace = true
 hokulea-eigenda.workspace = true
 eigenda-cert.workspace = true
@@ -35,3 +36,7 @@ tokio = { workspace = true, features = ["full"] }
 clap = { workspace = true, features = ["derive", "env"] }
 serde.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+eigenda-cert = { workspace = true, features = ["test-utils"] }
+rust-kzg-bn254-primitives.workspace = true
