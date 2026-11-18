@@ -15,7 +15,8 @@ use ark_bn254::G1Affine;
 use ark_serialize::CanonicalDeserialize;
 use hokulea_proof::EigenDAPreimage;
 pub use kzg_proof::{
-    compute_kzg_proof, compute_kzg_proof_with_srs, convert_biguint_to_be_32_bytes,
+    compute_kzg_commitment_and_proof, compute_kzg_commitment_and_proof_with_srs, compute_kzg_proof,
+    compute_kzg_proof_with_srs, convert_biguint_to_be_32_bytes,
 };
 use rust_kzg_bn254_prover::srs::SRS;
 use std::borrow::Cow;
@@ -54,10 +55,14 @@ pub static G1_SRS: LazyLock<SRS<'static>> = LazyLock::new(|| {
 /// creates kzg proof for all encoded payloads within the eigenda preimage.
 /// The KZG proofs is computed on Fiat-Sharmir point from the encoded payload
 /// (blob is an inverse Fourier Transform of encoded payload).
+/// The proofs of `encoded_payloads` come first, then those of `certified_payloads`, the order
+/// `EigenDAWitness::from_preimage` expects.
 pub fn create_kzg_proofs_for_eigenda_preimage(preimage: &EigenDAPreimage) -> Vec<FixedBytes<64>> {
     let start = Instant::now();
     let mut kzg_proofs = vec![];
-    for (_, encoded_payload) in &preimage.encoded_payloads {
+    let legacy = preimage.encoded_payloads.iter().map(|(_, e)| e);
+    let certified = preimage.certified_payloads.iter().map(|(_, e)| e);
+    for encoded_payload in legacy.chain(certified) {
         // Compute kzg proof for the entire encoded payload on a deterministic random point
         let kzg_proof = match compute_kzg_proof(encoded_payload.serialize()) {
             Ok(p) => p,

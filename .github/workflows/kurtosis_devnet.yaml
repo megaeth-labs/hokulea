@@ -18,14 +18,32 @@ jobs:
         with:
           version: ${{ env.MISE_VERSION }}
           experimental: true
+      - name: Create read-only dependency token
+        id: deps-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.MEGA_MAXWELL_CLIENT_ID }}
+          private-key: ${{ secrets.MEGA_MAXWELL_PK }}
+          owner: megaeth-labs
+          repositories: mega-block-certifier,mega-kona
+          permission-contents: read
+      - name: Fetch private Git dependencies
+        uses: megaeth-labs/.github/.github/actions/git-auth@54d24b6d6862150ec11585323c433348251d5e27
+        with:
+          token: ${{ steps.deps-token.outputs.token }}
+          command: cargo fetch --locked
       - run: just run-kurtosis-devnet-with-eigenlabs-package
       # We build the client here because `just run-client-native-against-devnet`
       # first polls op-geth for a first finalized block, which takes a few minutes,
       # and only after that runs `cargo run` which then builds the client, and takes another
       # few minutes. Better to build here while waiting for first l2 block to finalize.
       - run: RISC0_SKIP_BUILD=1 SP1_SKIP_PROGRAM_BUILD=true just build-native-host
+        env:
+          CARGO_NET_OFFLINE: 'true'
       # We run this explicitly here even though its run implicitly as a dependency of `run-client-native-against-devnet`
       # just so that we can see the breakdown timing requirements for each step.
       - run: just _kurtosis_wait_for_first_l2_finalized_block
       - run: RISC0_SKIP_BUILD=1 SP1_SKIP_PROGRAM_BUILD=true just run-client-against-devnet 'native' 
+        env:
+          CARGO_NET_OFFLINE: 'true'
       # TODO: we should also run the asterisc/cannon client once it works

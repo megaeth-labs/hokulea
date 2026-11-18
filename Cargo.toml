@@ -29,19 +29,19 @@ codegen-units = 1
 lto = "fat"
 
 [workspace.dependencies]
-kona-client = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-host = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-derive = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-driver = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-executor = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-preimage = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-proof = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-std-fpvm = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-std-fpvm-proc = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-genesis = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-protocol = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-cli = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", default-features = false }
-kona-megaevm = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", tag = "v1.2.1", package = "kona-megaevm", default-features = false }
+kona-client = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-host = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-derive = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-driver = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-executor = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-preimage = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-proof = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-std-fpvm = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-std-fpvm-proc = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-genesis = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-protocol = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-cli = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", default-features = false }
+kona-megaevm = { version = "=1.2.1", git = "https://github.com/megaeth-labs/mega-kona.git", rev = "5d4ebfb030e5ec34c7bcd2fca5d3443c6b56949d", package = "kona-megaevm", default-features = false }
 
 # Workspace
 hokulea-host-bin = { path = "bin/host", version = "0.2.0", default-features = false }

@@ -31,6 +31,7 @@ canoe-verifier.workspace = true
 canoe-verifier-address-fetcher.workspace = true
 
 [dev-dependencies]
+eigenda-cert = { workspace = true, features = ["test-utils"] }
 hokulea-compute-proof.workspace = true
 rust-kzg-bn254-prover.workspace = true
 num.workspace = true
