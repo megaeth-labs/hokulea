@@ -6,7 +6,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 use alloy_primitives::{FixedBytes, B256};
 
-use eigenda_cert::AltDACommitment;
+use eigenda_cert::{AltDACommitment, CertifiedCommitment};
 use hokulea_eigenda::EncodedPayload;
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,9 @@ pub struct EigenDAPreimage {
     pub validities: Vec<(AltDACommitment, bool)>,
     /// encoded_payload corresponds to a da cert and its kzg proof
     pub encoded_payloads: Vec<(AltDACommitment, EncodedPayload)>,
+    /// encoded payload of each certified commitment derivation resolved, in derivation order
+    #[serde(default)]
+    pub certified_payloads: Vec<(CertifiedCommitment, EncodedPayload)>,
 }
 
 /// EigenDAWitness contains preimage and witness data to be provided into
@@ -72,6 +75,10 @@ pub struct EigenDAWitness {
     pub validities: Vec<(AltDACommitment, bool)>,
     /// encoded_payload corresponds to a da cert and its kzg proof
     pub encoded_payloads: Vec<(AltDACommitment, EncodedPayload, FixedBytes<64>)>,
+    /// certified encoded payloads with the kzg proof binding each to its certificate's blob
+    /// point. They carry no validity: the batch inbox accepting the commitment is its validity.
+    #[serde(default)]
+    pub certified_payloads: Vec<(CertifiedCommitment, EncodedPayload, FixedBytes<64>)>,
     /// used and populated at the end of canoe proof
     /// it should only deserialize to one zk proof that proves all DA certs are
     /// correct
@@ -81,7 +88,9 @@ pub struct EigenDAWitness {
 impl EigenDAWitness {
     /// convert [EigenDAPreimage] into witnes data. It enforces there must be a canoe proof
     /// if there is at least one required validity proof, and the number of KZG proof must
-    /// match number of encoded payload.
+    /// match number of encoded payload. `kzg_proofs` lists the proofs of `encoded_payloads`
+    /// followed by those of `certified_payloads`, the order
+    /// `hokulea_compute_proof::create_kzg_proofs_for_eigenda_preimage` produces.
     pub fn from_preimage(
         preimage: EigenDAPreimage,
         kzg_proofs: Vec<FixedBytes<64>>,
@@ -92,21 +101,30 @@ impl EigenDAWitness {
         }
         let mut encoded_payloads_with_kzg_proof = Vec::new();
 
-        if kzg_proofs.len() != preimage.encoded_payloads.len() {
+        if kzg_proofs.len() != preimage.encoded_payloads.len() + preimage.certified_payloads.len() {
             return Err(EigenDAWitnessError::MismatchKzgProof);
         }
+        let (legacy_proofs, certified_proofs) =
+            kzg_proofs.split_at(preimage.encoded_payloads.len());
 
-        for (i, proof) in kzg_proofs.iter().enumerate() {
+        for (i, proof) in legacy_proofs.iter().enumerate() {
             encoded_payloads_with_kzg_proof.push((
                 preimage.encoded_payloads[i].0.clone(),
                 preimage.encoded_payloads[i].1.clone(),
                 *proof,
             ))
         }
+        let certified_payloads = preimage
+            .certified_payloads
+            .into_iter()
+            .zip(certified_proofs)
+            .map(|((commitment, encoded_payload), proof)| (commitment, encoded_payload, *proof))
+            .collect();
 
         let witness = EigenDAWitness {
             validities: preimage.validities,
             encoded_payloads: encoded_payloads_with_kzg_proof,
+            certified_payloads,
             canoe_proof_bytes: canoe_proof,
         };
         Ok(witness)
@@ -115,15 +133,22 @@ impl EigenDAWitness {
     /// Deconstruct [EigenDAWitness] back into its component parts: preimage, KZG proofs, and canoe proof.
     /// This is the inverse operation of [Self::from_preimage].
     pub fn into_preimage(self) -> (EigenDAPreimage, Vec<FixedBytes<64>>, Option<Vec<u8>>) {
-        let (encoded_payloads, kzg_proofs): (Vec<_>, Vec<_>) = self
+        let (encoded_payloads, mut kzg_proofs): (Vec<_>, Vec<_>) = self
             .encoded_payloads
             .into_iter()
             .map(|(commitment, payload, kzg_proof)| ((commitment, payload), kzg_proof))
             .unzip();
+        let (certified_payloads, certified_proofs): (Vec<_>, Vec<_>) = self
+            .certified_payloads
+            .into_iter()
+            .map(|(commitment, payload, kzg_proof)| ((commitment, payload), kzg_proof))
+            .unzip();
+        kzg_proofs.extend(certified_proofs);
 
         let preimage = EigenDAPreimage {
             validities: self.validities,
             encoded_payloads,
+            certified_payloads,
         };
 
         (preimage, kzg_proofs, self.canoe_proof_bytes)

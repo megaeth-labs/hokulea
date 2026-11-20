@@ -1,5 +1,6 @@
 use alloy_primitives::keccak256;
 
+use crate::certified::fetch_certified_payload_hint;
 use crate::cfg::SingleChainHostWithEigenDA;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -34,6 +35,14 @@ impl HintHandler for SingleChainHintHandlerWithEigenDA {
         match hint.ty {
             ExtendedHintType::EigenDACert => {
                 fetch_eigenda_hint(hint, providers, kv).await?;
+            }
+            ExtendedHintType::CertifiedPayload => {
+                fetch_certified_payload_hint(
+                    &hint.data,
+                    providers.eigenda_preimage_provider.certifier(),
+                    kv,
+                )
+                .await?;
             }
             ExtendedHintType::Original(ty) => {
                 let hint_original = Hint {
@@ -148,7 +157,7 @@ async fn store_encoded_payload(
     // encoded_payload has identical length as eigenda blob
     let blob_length_fe = altda_commitment.get_num_field_element();
     // Verify encoded_payload data is properly formatted
-    assert!(encoded_payload.len() % 32 == 0 && !encoded_payload.is_empty());
+    assert!(encoded_payload.len().is_multiple_of(32) && !encoded_payload.is_empty());
 
     // Preliminary defense check against malicious eigenda proxy host
     // verify there is an empty byte for every 31 bytes. This is a harder constraint than field element range check.

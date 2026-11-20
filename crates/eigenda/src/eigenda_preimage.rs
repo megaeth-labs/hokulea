@@ -4,9 +4,12 @@ use crate::eigenda_data::EncodedPayload;
 use crate::traits::EigenDAPreimageProvider;
 use crate::HokuleaPreimageError;
 
-use crate::errors::{HokuleaErrorKind, HokuleaRecencyCheckError, HokuleaStatelessError};
+use crate::errors::{
+    CertifiedPayloadError, HokuleaErrorKind, HokuleaRecencyCheckError, HokuleaStatelessError,
+};
+use crate::Payload;
 use alloy_primitives::Bytes;
-use eigenda_cert::{AltDACommitment, EigenDAVersionedCert};
+use eigenda_cert::{AltDACommitment, CertifiedCommitment, EigenDAVersionedCert};
 
 /// A data iterator that reads from a preimage.
 #[derive(Debug, Clone)]
@@ -59,6 +62,24 @@ where
             .map_err(|e| e.into())
     }
 
+    /// Resolves a certified commitment to its payload.
+    ///
+    /// The provider binds the encoded payload to the certificate's blob point; this holds it to
+    /// the rest of what the certificate states, the width, and requires the encoded payload to be
+    /// the one encoding of what it decodes to, so a single payload is all a certificate can name.
+    pub async fn next_certified(
+        &mut self,
+        commitment: &CertifiedCommitment,
+        l1_inclusion_bn: u64,
+    ) -> Result<Payload, HokuleaErrorKind> {
+        let encoded_payload = self
+            .eigenda_fetcher
+            .get_certified_encoded_payload(commitment, l1_inclusion_bn)
+            .await
+            .map_err(Into::<HokuleaErrorKind>::into)?;
+        Ok(decode_certified_payload(commitment, &encoded_payload)?)
+    }
+
     /// parse calldata into altda commitment
     pub fn parse(&mut self, data: &Bytes) -> Result<AltDACommitment, HokuleaStatelessError> {
         if data.len() <= 2 {
@@ -74,6 +95,25 @@ where
             }
         };
         Ok(altda_commitment)
+    }
+}
+
+fn decode_certified_payload(
+    commitment: &CertifiedCommitment,
+    encoded_payload: &EncodedPayload,
+) -> Result<Payload, CertifiedPayloadError> {
+    let expected = u64::from(commitment.blob().length);
+    let actual = encoded_payload.num_field_element();
+    if actual != expected {
+        return Err(CertifiedPayloadError::LengthMismatch { expected, actual });
+    }
+
+    let payload = encoded_payload
+        .decode()
+        .map_err(CertifiedPayloadError::Decoding)?;
+    match EncodedPayload::encode(&payload) {
+        Ok(reencoded) if reencoded == *encoded_payload => Ok(payload),
+        _ => Err(CertifiedPayloadError::NonCanonical),
     }
 }
 
